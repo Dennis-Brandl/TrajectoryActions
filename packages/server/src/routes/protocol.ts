@@ -1,0 +1,307 @@
+import { Router } from 'express'
+import type { InstanceManager } from '@trajectory/engine'
+import type {
+  ActionRepository,
+  InstanceRepository,
+  SettingsRepository,
+  Instance,
+} from '@trajectory/storage'
+import type { SseManager } from '../sse-manager.js'
+import { validateBody } from '../validation.js'
+
+// ============================================================
+// Response shape helper
+// ============================================================
+
+// ============================================================
+// Parameter-spec normalization (REST-02)
+// ============================================================
+//
+// Stored `input_parameter_specifications` / `output_parameter_specifications`
+// have heterogeneous shapes inherited from Trajectory MD's evolving data model:
+//   - canonical (DataModelSpec.md): { id, default_value, value_type, json_schema?, description? }
+//   - legacy:                       { name, data_type, default_value }
+//   - property-typed:               { id, oid, default_value, description, entries }
+//
+// The REST protocol (RESTProtocolSpec.md § 2.2) requires a single canonical
+// wire shape: { name, description?, default_value?, json_schema? }. This
+// helper maps any of the stored shapes onto that contract so workflow clients
+// (the tester, Trajectory Mobile, etc.) see a stable surface.
+
+interface NormalizedParameterSpec {
+  name: string
+  description?: string
+  default_value?: string
+  json_schema?: string | null
+}
+
+function normalizeParameterSpec(raw: unknown): NormalizedParameterSpec {
+  if (raw === null || typeof raw !== 'object') {
+    return { name: '<invalid>' }
+  }
+  const p = raw as Record<string, unknown>
+
+  const name =
+    typeof p.id === 'string' && p.id.length > 0
+      ? p.id
+      : typeof p.name === 'string' && p.name.length > 0
+        ? p.name
+        : '<unnamed>'
+
+  const result: NormalizedParameterSpec = { name }
+  if (typeof p.description === 'string') result.description = p.description
+  if (typeof p.default_value === 'string') result.default_value = p.default_value
+  if (p.json_schema === null || typeof p.json_schema === 'string') {
+    result.json_schema = p.json_schema
+  }
+  return result
+}
+
+function formatInstanceResponse(instance: Instance) {
+  const history = instance.state_history as Array<{ state: string; timestamp: string }>
+  const current = history[history.length - 1]
+  const previous = history.length >= 2 ? history[history.length - 2] : null
+
+  return {
+    instance_id: instance.runtime_action_instance_id,
+    action_oid: instance.action_oid,
+    environment_oid: instance.environment_oid,
+    workflow_instance_id: instance.workflow_instance_id,
+    step_instance_id: instance.step_instance_id,
+    step_oid: instance.step_oid,
+    visibility: instance.visibility,
+    state: {
+      current: instance.state,
+      previous: previous?.state ?? null,
+      entered_at: current?.timestamp ?? instance.created_at,
+    },
+    inputs: instance.input_parameters,
+    outputs: instance.output_parameters,
+    created_at: instance.created_at,
+    started_at: instance.started_at,
+    completed_at: instance.completed_at,
+    error: instance.error,
+  }
+}
+
+// ============================================================
+// Protocol router factory
+// ============================================================
+
+/**
+ * createProtocolRouter — Express Router with all /trajectory/v1/ endpoints.
+ *
+ * Endpoints (plan 05-01):
+ *   GET  /health                       — REST-01
+ *   GET  /capabilities                 — REST-02
+ *   POST /actions/:action_oid/invoke   — REST-03
+ *   GET  /instances/:id                — REST-04
+ *   GET  /instances                    — REST-08
+ *   DELETE /instances/:id              — REST-09
+ */
+export function createProtocolRouter(
+  manager: InstanceManager,
+  actionRepo: ActionRepository,
+  instanceRepo: InstanceRepository,
+  _settingsRepo: SettingsRepository,
+  _sseManager: SseManager
+): Router {
+  // _settingsRepo and _sseManager reserved for plan 05-02 (SSE streaming, expose_traceback)
+  void _settingsRepo
+  void _sseManager
+
+  const router = Router()
+
+  // --------------------------------------------------------
+  // REST-01: GET /health
+  // --------------------------------------------------------
+  router.get('/health', (_req, res) => {
+    res.status(200).json({
+      data: {
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        pool: manager.poolStatus,
+      },
+      meta: {},
+    })
+  })
+
+  // --------------------------------------------------------
+  // REST-02: GET /capabilities
+  // --------------------------------------------------------
+  router.get('/capabilities', (_req, res) => {
+    const actions = actionRepo.findAll()
+
+    const data = actions.map((action) => ({
+      action_oid: action.oid,
+      environment_oid: action.environment_oid,
+      local_id: action.local_id,
+      version: action.version,
+      description: action.description,
+      visibility: action.action_visibility,
+      input_parameters: (action.input_parameter_specifications as unknown[]).map(
+        normalizeParameterSpec
+      ),
+      output_parameters: (action.output_parameter_specifications as unknown[]).map(
+        normalizeParameterSpec
+      ),
+      supported_commands:
+        action.action_visibility === 'observable'
+          ? ['PAUSE', 'RESUME', 'HOLD', 'UNHOLD', 'ABORT', 'STOP', 'CLEAR']
+          : ['ABORT'],
+    }))
+
+    res.status(200).json({
+      data,
+      meta: { total: data.length },
+    })
+  })
+
+  // --------------------------------------------------------
+  // REST-03: POST /actions/:action_oid/invoke
+  // --------------------------------------------------------
+  router.post('/actions/:action_oid/invoke', async (req, res, next) => {
+    const validationResult = validateBody(req.body, {
+      environment_oid: { required: true, type: 'string' },
+      workflow_instance_id: { required: true, type: 'string' },
+      step_instance_id: { required: true, type: 'string' },
+      step_oid: { required: true, type: 'string' },
+      input_parameters: { required: true, type: 'array' },
+      timeout_ms: { required: false, type: 'number' },
+      // Test/dev affordance — see InvokeRequest in @trajectory/engine.
+      action_property_overrides: { required: false, type: 'object' },
+    })
+
+    if (!validationResult.valid) {
+      res.status(400).json({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: validationResult.message,
+          details: {},
+        },
+      })
+      return
+    }
+
+    const body = validationResult.data
+
+    try {
+      const result = await manager.invoke({
+        action_oid: req.params.action_oid,
+        workflow_instance_id: body.workflow_instance_id as string,
+        step_instance_id: body.step_instance_id as string,
+        step_oid: body.step_oid as string,
+        input_parameters: body.input_parameters as Array<{ name: string; value: string }>,
+        ...(body.timeout_ms !== undefined && { timeout_ms: body.timeout_ms as number }),
+        ...(body.action_property_overrides !== undefined && {
+          action_property_overrides: body.action_property_overrides as Record<
+            string,
+            Record<string, string>
+          >,
+        }),
+      })
+
+      res.status(201).json({
+        data: {
+          instance_id: result.runtime_action_instance_id,
+        },
+        meta: {},
+      })
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  // --------------------------------------------------------
+  // REST-04: GET /instances/:id
+  // --------------------------------------------------------
+  router.get('/instances/:id', (req, res) => {
+    const instance = manager.getInstance(req.params.id)
+
+    if (!instance) {
+      res.status(404).json({
+        error: {
+          code: 'INSTANCE_NOT_FOUND',
+          message: 'Instance not found',
+          details: {},
+        },
+      })
+      return
+    }
+
+    res.status(200).json({
+      data: formatInstanceResponse(instance),
+      meta: {},
+    })
+  })
+
+  // --------------------------------------------------------
+  // REST-08: GET /instances
+  // --------------------------------------------------------
+  router.get('/instances', async (req, res, next) => {
+    try {
+      const { workflow_instance_id, status, action_oid } = req.query as Record<string, string>
+
+      let instances: Instance[]
+
+      if (workflow_instance_id) {
+        instances = instanceRepo.findByWorkflow(workflow_instance_id)
+        // Secondary filter by action_oid if both provided
+        if (action_oid) {
+          instances = instances.filter((i) => i.action_oid === action_oid)
+        }
+      } else if (action_oid) {
+        instances = instanceRepo.findByAction(action_oid)
+      } else if (status === 'active') {
+        instances = instanceRepo.findActive()
+      } else if (status) {
+        instances = instanceRepo.findByStatus(status)
+      } else {
+        instances = instanceRepo.findAll(100)
+      }
+
+      const data = instances.map(formatInstanceResponse)
+
+      res.status(200).json({
+        data,
+        meta: { total: data.length },
+      })
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  // --------------------------------------------------------
+  // REST-09: DELETE /instances/:id
+  // --------------------------------------------------------
+  router.delete('/instances/:id', async (req, res, next) => {
+    const instance = manager.getInstance(req.params.id)
+
+    if (!instance) {
+      res.status(404).json({
+        error: {
+          code: 'INSTANCE_NOT_FOUND',
+          message: 'Instance not found',
+          details: {},
+        },
+      })
+      return
+    }
+
+    try {
+      await manager.cancelInstance(req.params.id)
+
+      res.status(200).json({
+        data: {
+          instance_id: req.params.id,
+          cancelled: true,
+        },
+        meta: {},
+      })
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  return router
+}

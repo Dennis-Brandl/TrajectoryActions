@@ -1,0 +1,163 @@
+import express from 'express'
+import cors from 'cors'
+import morgan from 'morgan'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import {
+  initializeDatabase,
+  ActionRepository,
+  InstanceRepository,
+  SettingsRepository,
+  EnvironmentRepository,
+  CodeVersionRepository,
+  LogRepository,
+} from '@trajectory/storage'
+import { InstanceManager } from '@trajectory/engine'
+import { SseManager } from './sse-manager.js'
+import { createProtocolRouter } from './routes/protocol.js'
+import { createCommandsRouter } from './routes/commands.js'
+import { createManagementRouter } from './routes/management.js'
+import { createApiKeyAuth } from './middleware/auth.js'
+import { errorHandler } from './middleware/error-handler.js'
+
+// ============================================================
+// ESM __dirname equivalent
+// ============================================================
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+// ============================================================
+// Configuration
+// ============================================================
+
+const PORT = Number(process.env.PORT ?? 3001)
+// __dirname is packages/server/src (tsx) or packages/server/dist (compiled)
+// Go up to packages/server/, then packages/, then project root
+const PACKAGE_ROOT = path.resolve(__dirname, '..')
+const PROJECT_ROOT = path.resolve(PACKAGE_ROOT, '..', '..')
+
+const DB_PATH = process.env.DB_PATH ?? path.resolve(PROJECT_ROOT, 'data', 'trajectory.db')
+const SIDECAR_SCRIPT =
+  process.env.SIDECAR_SCRIPT ??
+  path.resolve(PROJECT_ROOT, 'packages', 'python-sidecar', 'sandbox_runner.py')
+
+// ============================================================
+// Startup: database, repositories, managers
+// ============================================================
+
+const db = initializeDatabase(DB_PATH)
+
+// Standalone repositories for protocol router (in addition to InstanceManager's internal repos)
+const actionRepo = new ActionRepository(db)
+const instanceRepo = new InstanceRepository(db)
+const settingsRepo = new SettingsRepository(db)
+const environmentRepo = new EnvironmentRepository(db)
+const codeVersionRepo = new CodeVersionRepository(db)
+const logRepo = new LogRepository(db)
+
+// SSE event bus
+const sseManager = new SseManager()
+
+// InstanceManager wired with SseManager callbacks
+const manager = new InstanceManager(db, {
+  scriptPath: SIDECAR_SCRIPT,
+  onStateChange: (instanceId, state, instance) => {
+    const history = instance.state_history as Array<{ state: string; timestamp: string }>
+    const previousState = history.length >= 2 ? (history[history.length - 2]?.state ?? null) : null
+    sseManager.publishStateChange(instanceId, state, previousState, instance)
+  },
+  onTerminal: (instanceId, state, instance) => {
+    const history = instance.state_history as Array<{ state: string; timestamp: string }>
+    const previousState = history.length >= 2 ? (history[history.length - 2]?.state ?? null) : null
+    sseManager.publishTerminal(instanceId, state, previousState, instance)
+  },
+  onError: (instanceId, error) => {
+    sseManager.publishError(instanceId, error.message)
+  },
+})
+
+// ============================================================
+// Express application
+// ============================================================
+
+const app = express()
+
+// --------------------------------------------------------
+// Middleware (order matters)
+// --------------------------------------------------------
+
+app.use(
+  cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'X-API-Key', 'Last-Event-ID'],
+    exposedHeaders: ['Content-Type'],
+  })
+)
+
+app.use(morgan('dev'))
+app.use(express.json())
+
+// API key auth on all /trajectory/v1/ routes
+app.use('/trajectory/v1', createApiKeyAuth(settingsRepo))
+
+// --------------------------------------------------------
+// Routers
+// --------------------------------------------------------
+
+app.use(
+  '/trajectory/v1',
+  createProtocolRouter(manager, actionRepo, instanceRepo, settingsRepo, sseManager)
+)
+
+app.use('/trajectory/v1', createCommandsRouter(manager, sseManager))
+
+app.use(
+  '/management/v1',
+  createManagementRouter(
+    db,
+    DB_PATH,
+    manager,
+    environmentRepo,
+    actionRepo,
+    codeVersionRepo,
+    instanceRepo,
+    logRepo,
+    settingsRepo
+  )
+)
+
+// --------------------------------------------------------
+// Error handler — must be LAST
+// --------------------------------------------------------
+
+app.use(errorHandler)
+
+// ============================================================
+// Listen
+// ============================================================
+
+app.listen(PORT, () => {
+  console.log(`Trajectory Action Server listening on http://localhost:${PORT}`)
+  console.log(`  Database: ${DB_PATH}`)
+  console.log(`  Sidecar:  ${SIDECAR_SCRIPT}`)
+})
+
+// ============================================================
+// Graceful shutdown
+// ============================================================
+
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, shutting down...')
+  sseManager.shutdown()
+  await manager.shutdown()
+  process.exit(0)
+})
+
+process.on('SIGINT', async () => {
+  console.log('SIGINT received, shutting down...')
+  sseManager.shutdown()
+  await manager.shutdown()
+  process.exit(0)
+})
