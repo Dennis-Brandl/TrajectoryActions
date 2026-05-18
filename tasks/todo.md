@@ -2,11 +2,11 @@
 
 ## Goal
 
-Wire ACTION to consume the family-shared design tokens and UI primitives published in MD's repo (commits `c6d8ca8` through `a0bf7f4` on `BrainpalMD/master`). Visual contract: **zero pixel changes** for existing ACTION users — both repos use shadcn-default OKLCH values, so the swap should be byte-equivalent for matching tokens.
+Wire ACTION to consume the family-shared design tokens and UI primitives published in MD's repo (commits `c6d8ca8` through `a0bf7f4` on `TrajectoryEditor/master`). Visual contract: **zero pixel changes** for existing ACTION users — both repos use shadcn-default OKLCH values, so the swap should be byte-equivalent for matching tokens.
 
 ## Decided choices
 
-- **Consumption (B1):** `link:` dep — `"@trajectory/tokens": "link:../../../BrainpalMD/packages/tokens"` from `apps/console/package.json`. Symlinks via `node_modules/@trajectory/*`, picks up MD's live changes. Couples to filesystem layout (works since both repos are siblings).
+- **Consumption (B1):** `link:` dep — `"@trajectory/tokens": "link:../../../TrajectoryEditor/packages/tokens"` from `apps/console/package.json`. Symlinks via `node_modules/@trajectory/*`, picks up MD's live changes. Couples to filesystem layout (works since both repos are siblings).
 - **Migration scope (B2):** Overlapping primitives only — `badge`, `button`, `dialog`, `input`, `label`, `select`. ACTION's 5 unique components (`card`, `separator`, `sheet`, `table`, `tabs`) stay in `apps/console/src/components/ui/`. Lifting them into `@trajectory/ui` is a follow-up when MD wants them too.
 - **Radix peer deps:** ACTION adds individual `@radix-ui/react-*` packages matching `@trajectory/ui`'s peer set. Existing `radix-ui` umbrella stays for ACTION's own components (sheet/table/tabs use it). Both can coexist.
 - **Brand variant:** `Button` from `@trajectory/ui` already has `variant="brand"`. ACTION gets it for free.
@@ -21,7 +21,7 @@ Wire ACTION to consume the family-shared design tokens and UI primitives publish
 ## Tooling decisions / open questions
 
 - **`@import 'shadcn/tailwind.css'` in ACTION's `index.css`** (line 3): MD doesn't have this. I need to investigate during Phase A1 — what does it provide, does it conflict with `@trajectory/tokens`? If it's just a stylistic add-on (animations / extra color utilities), keep it. If it defines color tokens, decide whether to keep, remove, or accept the override order.
-- **Tailwind 4 `@source` path for the linked package:** ACTION's symlink resolves at `node_modules/@trajectory/ui` → `../../BrainpalMD/packages/ui`. From `apps/console/src/index.css`, the directive will be `@source "../../../node_modules/@trajectory/ui/src"` (3 `../` to climb to repo root). Tailwind follows the symlink and scans MD's source files.
+- **Tailwind 4 `@source` path for the linked package:** ACTION's symlink resolves at `node_modules/@trajectory/ui` → `../../TrajectoryEditor/packages/ui`. From `apps/console/src/index.css`, the directive will be `@source "../../../node_modules/@trajectory/ui/src"` (3 `../` to climb to repo root). Tailwind follows the symlink and scans MD's source files.
 - **ACTION ports:** dev:console runs on `5176`, server on `3002` (changed in commit `4b6dbda`). MD runs on `5174` + `3001`. No conflict expected during work; existing ACTION servers may already be running on these ports — if so, leave them alone (per memory: never kill sibling Trajectory apps' servers).
 
 ## ACTION inventory recap
@@ -51,16 +51,16 @@ ACTION has no `cn` helper file at `src/lib/utils.ts` — need to verify that's w
 
 ## Phase A1 — Setup ✅
 
-- [x] **MD repo path**: confirmed `C:\BrainpalMD` is sibling of `C:\TrajectoryActions`; relative path from `apps/console/package.json` is `../../../BrainpalMD/packages/{tokens,ui}` (3 `../` to climb to `C:\`).
+- [x] **MD repo path**: confirmed `C:\TrajectoryEditor` is sibling of `C:\TrajectoryActions`; relative path from `apps/console/package.json` is `../../../TrajectoryEditor/packages/{tokens,ui}` (3 `../` to climb to `C:\`).
 - [x] **`shadcn/tailwind.css` investigation**: resolves to `node_modules/shadcn/dist/tailwind.css` — a 95-line file with shadcn-specific Tailwind 4 additions (accordion keyframes, custom variants like `data-open`/`data-closed`). Independent of design tokens. **Decision: keep the import** — it adds animations + variants @trajectory/tokens doesn't provide; no conflict.
 - [x] **`cn` helper location**: confirmed at `apps/console/src/lib/utils.ts`. **Important:** that file ALSO exports `formatUptime`, `formatDuration`, `formatTimestamp` — used by 13 files. utils.ts must NOT be deleted in cleanup. Codemod for `cn` must be **line-exact** (only swap `import { cn } from '@/lib/utils'`), not path-replace.
 - [x] **Added to `apps/console/package.json`**:
-  - `"@trajectory/tokens": "file:../../../BrainpalMD/packages/tokens"`
-  - `"@trajectory/ui": "file:../../../BrainpalMD/packages/ui"`
+  - `"@trajectory/tokens": "file:../../../TrajectoryEditor/packages/tokens"`
+  - `"@trajectory/ui": "file:../../../TrajectoryEditor/packages/ui"`
   - 8 individual `@radix-ui/react-*` packages (`alert-dialog`, `dialog`, `dropdown-menu`, `label`, `radio-group`, `scroll-area`, `select`, `slot`) at versions matching MD's lockfile. Existing `radix-ui` umbrella stays for ACTION's local components (sheet, table, tabs).
 - [x] **Deviation from plan:** plan said `link:` deps (Yarn/pnpm syntax). npm 11.6.2 rejects `link:` with `EUNSUPPORTEDPROTOCOL`. Switched to `file:` which is npm's local-path syntax. **However:** with npm workspaces enabled (`workspaces: ["packages/*", "apps/*"]` in ACTION root), npm creates **actual symlinks** in `node_modules/@trajectory/{tokens,ui}` pointing at MD's directory — NOT copies. So live propagation is preserved exactly as intended.
 - [x] **`npm install`** succeeded — added 5 packages (the radix individuals not already pulled transitively by `radix-ui` umbrella). No errors.
-- [x] **Symlinks verified**: `node_modules/@trajectory/tokens` → `/c/BrainpalMD/packages/tokens/`, `node_modules/@trajectory/ui` → `/c/BrainpalMD/packages/ui/`. Both contain the expected files (dist/tokens.light.css, src/primitives/\*).
+- [x] **Symlinks verified**: `node_modules/@trajectory/tokens` → `/c/TrajectoryEditor/packages/tokens/`, `node_modules/@trajectory/ui` → `/c/TrajectoryEditor/packages/ui/`. Both contain the expected files (dist/tokens.light.css, src/primitives/\*).
 
 **Verification:** `tsc -b` exits 0. Symlinks resolve to MD's repo. ACTION's existing components still type-check (no @trajectory/\* imports added yet, so this just confirms nothing broke).
 
@@ -72,7 +72,7 @@ Now that I can see the symlink layout, the `@source` directive path is straightf
 @source "../../../node_modules/@trajectory/ui/src";
 ```
 
-Three `../` to climb from `apps/console/src/` to ACTION repo root. The `node_modules/@trajectory/ui/src` symlink resolves to `C:\BrainpalMD\packages\ui\src`. To be set in Phase A3.
+Three `../` to climb from `apps/console/src/` to ACTION repo root. The `node_modules/@trajectory/ui/src` symlink resolves to `C:\TrajectoryEditor\packages\ui\src`. To be set in Phase A3.
 
 ## Phase A2 — Tokens ✅
 
@@ -89,13 +89,13 @@ Three `../` to climb from `apps/console/src/` to ACTION repo root. The `node_mod
   - IDE shell tokens (now via `@trajectory/tokens`): `--activity-bar`, `--side-panel`, `--status-bar`
   - Standard semantic tokens: `--background`, `--primary`, `--ring`, etc. (full shadcn set)
 - `tsc -b` exits 0
-- Symlink chain: ACTION's `node_modules/@trajectory/tokens/dist/tokens.light.css` → `C:\BrainpalMD\packages\tokens\dist\tokens.light.css`. So if MD regenerates tokens via `npm run build --workspace=@trajectory/tokens`, ACTION picks up the change immediately on next CSS reload.
+- Symlink chain: ACTION's `node_modules/@trajectory/tokens/dist/tokens.light.css` → `C:\TrajectoryEditor\packages\tokens\dist\tokens.light.css`. So if MD regenerates tokens via `npm run build --workspace=@trajectory/tokens`, ACTION picks up the change immediately on next CSS reload.
 
 **Pixel parity:** values for the shell tokens (`--activity-bar`, etc.) and shadcn semantics (`--background`, etc.) are byte-identical to what ACTION had before — verified during MD's Phase 2 (the JSON values were lifted directly from ACTION's CSS).
 
 ## Phase A3 — Component migration (overlapping 6) + @source ✅
 
-- [x] Added `@source "../../../node_modules/@trajectory/ui/src";` to `apps/console/src/index.css` after the `@import` block. Tailwind 4 follows the symlink (`node_modules/@trajectory/ui` → `C:\BrainpalMD\packages\ui`) and scans MD's component TSX
+- [x] Added `@source "../../../node_modules/@trajectory/ui/src";` to `apps/console/src/index.css` after the `@import` block. Tailwind 4 follows the symlink (`node_modules/@trajectory/ui` → `C:\TrajectoryEditor\packages\ui`) and scans MD's component TSX
 - [x] Codemod via `sed` across all .ts/.tsx in `apps/console/src/`:
   - 6 component path swaps: `@/components/ui/{badge,button,dialog,input,label,select}` → `@trajectory/ui`
   - 1 line-exact `cn` swap: `^import { cn } from '@/lib/utils'$` → `import { cn } from '@trajectory/ui'` (deliberately NOT a path-replace — the format-helper imports `formatUptime`/`formatDuration`/`formatTimestamp` from the same path stay intact)
