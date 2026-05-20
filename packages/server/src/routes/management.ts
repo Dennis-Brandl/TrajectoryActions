@@ -725,8 +725,8 @@ export function createManagementRouter(
 
       // Helper: upsert one env spec + its actions; return the list of upserted action OIDs.
       // Used by both the wfenvir branch and the new wfenvirbundle branch.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const processEnvSpec = (
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         envData: Record<string, any>,
         schemaVersion: string,
         sourceFilename: string
@@ -831,7 +831,13 @@ export function createManagementRouter(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const lib = item.data as Record<string, any>
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const envSpecs = (lib['environment_specifications'] ?? []) as Record<string, any>[]
+            const envSpecs = lib['environment_specifications'] as Record<string, any>[]
+            if (!Array.isArray(envSpecs)) {
+              // Defense-in-depth: parsing guarantees this, but bail loudly if invariants break.
+              throw new Error(
+                `Bundle transaction: environment_specifications missing or not an array (file: ${item.file.originalname})`
+              )
+            }
             for (const envData of envSpecs) {
               const upsertedActionOids = processEnvSpec(
                 envData,
@@ -847,7 +853,7 @@ export function createManagementRouter(
                     state: cf.state,
                     source_code: cf.source,
                     created_by: 'import',
-                    description: 'imported from .WFenvirBundle',
+                    description: null,
                   })
                 }
               }
