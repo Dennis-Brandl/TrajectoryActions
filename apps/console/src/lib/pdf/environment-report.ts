@@ -16,7 +16,7 @@ const PAGE_BREAK_THRESHOLD = 80 // mm — start a new page if less remains
 
 export function generateEnvironmentReportPDF(bundle: EnvirBundle): Blob {
   const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' })
-  const generatedAt = new Date().toISOString()
+  const generatedAt = new Date().toLocaleString()
 
   let y = renderCover(pdf, bundle)
   y = ensureNewPage(pdf, y)
@@ -111,7 +111,7 @@ function renderAction(
   pdf.text(action.record.local_id, PAGE_MARGIN, y)
   pdf.setFont('helvetica', 'normal')
   pdf.setFontSize(10)
-  pdf.text(action.record.action_visibility, PAGE_W - PAGE_MARGIN - 25, y)
+  pdf.text(action.record.action_visibility, PAGE_W - PAGE_MARGIN, y, { align: 'right' })
   y += 6
 
   // Description
