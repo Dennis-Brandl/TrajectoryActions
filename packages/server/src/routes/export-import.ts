@@ -270,6 +270,110 @@ export function createExportImportRouter(
   })
 
   // --------------------------------------------------------
+  // GET /environments/:oid/export-bundle — Download .WFenvirBundle ZIP
+  // --------------------------------------------------------
+
+  async function buildEnvironmentBundle(envOid: string): Promise<{
+    buffer: Buffer
+    filename: string
+    manifest: {
+      format: 'WFenvirBundle'
+      format_version: 1
+      exported_at: string
+      container_version: string
+      environment_oid: string
+      environment_local_id: string
+      action_count: number
+      code_file_count: number
+    }
+  } | null> {
+    const env = environmentRepo.findByOid(envOid)
+    if (!env) return null
+
+    const actions = actionRepo.findByEnvironment(env.oid)
+
+    const innerEnvJson = {
+      local_id: env.local_id,
+      oid: env.oid,
+      version: env.version,
+      last_modified_date: env.last_modified_date,
+      schemaVersion: env.schema_version ?? '4.0',
+      environment_specifications: [
+        {
+          oid: env.oid,
+          local_id: env.local_id,
+          version: env.version,
+          last_modified_date: env.last_modified_date,
+          description: env.description,
+          action_property_specifications: env.action_property_specifications,
+          value_property_specifications: env.value_property_specifications,
+          resource_property_specifications: env.resource_property_specifications,
+          included_actions: actions.map((a) => ({
+            oid: a.oid,
+            local_id: a.local_id,
+            version: a.version,
+            last_modified_date: a.last_modified_date,
+            description: a.description,
+            action_visibility: a.action_visibility,
+            input_parameter_specifications: a.input_parameter_specifications,
+            output_parameter_specifications: a.output_parameter_specifications,
+            property_specifications: a.property_specifications,
+            timeout_seconds: a.timeout_seconds,
+          })),
+        },
+      ],
+    }
+
+    const zip = new JSZip()
+    zip.file(`${env.local_id}.WFenvir`, JSON.stringify(innerEnvJson, null, 2))
+
+    let codeFileCount = 0
+    for (const action of actions) {
+      const allVersions = codeVersionRepo.findByAction(action.oid)
+      const activeVersions = allVersions.filter((v) => v.is_active)
+      for (const v of activeVersions) {
+        zip.file(`code/${action.oid}/${v.state}.py`, v.source_code)
+        codeFileCount++
+      }
+    }
+
+    const manifest = {
+      format: 'WFenvirBundle' as const,
+      format_version: 1 as const,
+      exported_at: new Date().toISOString(),
+      container_version: '1.0.0',
+      environment_oid: env.oid,
+      environment_local_id: env.local_id,
+      action_count: actions.length,
+      code_file_count: codeFileCount,
+    }
+    zip.file('manifest.json', JSON.stringify(manifest, null, 2))
+
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' })
+    const filename = `${env.local_id}.WFenvirBundle`
+    return { buffer, filename, manifest }
+  }
+
+  router.get('/environments/:oid/export-bundle', (req, res, next) => {
+    const oid = req.params.oid as string
+    buildEnvironmentBundle(oid)
+      .then((result) => {
+        if (!result) {
+          return void res.status(404).json({
+            error: { code: 'NOT_FOUND', message: `Environment not found: ${oid}` },
+          })
+        }
+        res.set({
+          'Content-Type': 'application/zip',
+          'Content-Disposition': `attachment; filename="${encodeURIComponent(result.filename)}"`,
+          'Content-Length': String(result.buffer.length),
+        })
+        res.send(result.buffer)
+      })
+      .catch(next)
+  })
+
+  // --------------------------------------------------------
   // POST /snapshot/import?confirm=true — Upload .WFsnapshot ZIP
   // --------------------------------------------------------
   router.post('/snapshot/import', upload.single('file'), (req, res, next) => {
