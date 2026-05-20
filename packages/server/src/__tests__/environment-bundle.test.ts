@@ -247,4 +247,46 @@ describe('environment-bundle export', () => {
     const chopFile = zip.file(`code/${harness.actionOids[1]}/STARTING.py`)
     expect(chopFile).toBeNull()
   })
+
+  it('emits a valid bundle for an empty env (zero actions)', async () => {
+    // Seed a second env with no actions
+    const emptyEnvPayload = {
+      local_id: 'EmptyLite',
+      oid: '33333333-3333-3333-3333-333333333333',
+      version: '1',
+      last_modified_date: '2026-05-19T00:00:00.000Z',
+      schemaVersion: '4.0',
+      environment_specifications: [
+        {
+          oid: '44444444-4444-4444-4444-444444444444',
+          local_id: 'EmptyLite',
+          version: '1',
+          last_modified_date: '2026-05-19T00:00:00.000Z',
+          description: null,
+          action_property_specifications: [],
+          value_property_specifications: [],
+          resource_property_specifications: [],
+          included_actions: [],
+        },
+      ],
+    }
+    await request(harness.app)
+      .post('/management/v1/upload')
+      .attach('files', Buffer.from(JSON.stringify(emptyEnvPayload)), 'EmptyLite.WFenvir')
+      .expect(200)
+
+    const res = await request(harness.app)
+      .get('/management/v1/environments/44444444-4444-4444-4444-444444444444/export-bundle')
+      .responseType('blob')
+
+    expect(res.status).toBe(200)
+    const zip = await JSZip.loadAsync(res.body)
+    const manifest = JSON.parse(await zip.file('manifest.json')!.async('text'))
+    expect(manifest.action_count).toBe(0)
+    expect(manifest.code_file_count).toBe(0)
+
+    // No code files should exist
+    const codeEntries = Object.keys(zip.files).filter((n) => n.startsWith('code/'))
+    expect(codeEntries).toHaveLength(0)
+  })
 })
