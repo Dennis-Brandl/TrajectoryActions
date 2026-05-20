@@ -1,3 +1,9 @@
+// IMPORTANT: This module is the lazy boundary for `jszip`. Always reach it
+// via `await import('@/lib/envir-bundle')` from app code (see
+// `useGenerateEnvironmentReport`). If a static import is added from any
+// module in the main bundle path, jszip (~100 KB) ships in the initial
+// chunk, breaking the bundle-weight goal.
+
 import JSZip from 'jszip'
 
 export interface BundleManifest {
@@ -25,6 +31,19 @@ export interface BundleEnvironment {
   description: string | null
   last_modified_date: string | null
   action_property_specifications: BundleParameterSpec[]
+}
+
+// Wire-format shape used only inside parseEnvirBundle.
+// Fields that may be absent in the raw JSON are optional here; the parser
+// normalises them to always-present arrays before returning EnvirBundle.
+interface BundleEnvironmentInput {
+  oid: string
+  local_id: string
+  version: string
+  description: string | null
+  last_modified_date: string | null
+  action_property_specifications?: BundleParameterSpec[]
+  included_actions?: BundleAction[]
 }
 
 export interface BundleAction {
@@ -77,9 +96,7 @@ export async function parseEnvirBundle(blob: Blob): Promise<EnvirBundle> {
   ) {
     throw new Error('Inner .WFenvir has empty or missing environment_specifications')
   }
-  const envSpec = lib.environment_specifications[0] as BundleEnvironment & {
-    included_actions: BundleAction[]
-  }
+  const envSpec = lib.environment_specifications[0] as unknown as BundleEnvironmentInput
 
   // 3) Code files
   const codeByActionOid: Record<string, Record<string, string>> = {}
