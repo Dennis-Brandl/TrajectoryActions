@@ -5,6 +5,8 @@ import type { ActionSummaryInEnvironment } from '@/lib/types'
 export interface ExplorerEnvironment {
   oid: string
   local_id: string
+  version: string
+  last_modified_date: string | null
   actions: ExplorerAction[]
 }
 
@@ -43,6 +45,8 @@ export function useExplorerData() {
   const tree: ExplorerEnvironment[] = (detailQueries.data ?? []).map((detail) => ({
     oid: detail.oid,
     local_id: detail.local_id,
+    version: detail.version,
+    last_modified_date: detail.last_modified_date,
     actions: (detail.actions ?? []).map((a: ActionSummaryInEnvironment) => ({
       oid: a.oid,
       local_id: a.local_id,

@@ -10,7 +10,7 @@ type PanelStatus =
   | { kind: 'idle' }
   | { kind: 'uploading'; filename: string }
   | { kind: 'upload-error'; message: string }
-  | { kind: 'delete-error'; message: string }
+  | { kind: 'action-error'; message: string }
 
 export default function ExplorerPanel() {
   const { tree, isLoading, isError } = useExplorerData()
@@ -80,10 +80,10 @@ export default function ExplorerPanel() {
           Uploading {panelStatus.filename}…
         </div>
       )}
-      {(panelStatus.kind === 'upload-error' || panelStatus.kind === 'delete-error') && (
+      {(panelStatus.kind === 'upload-error' || panelStatus.kind === 'action-error') && (
         <div className="px-3 py-1.5 text-[11px] text-destructive border-b border-border shrink-0 flex items-start gap-1">
           <span className="flex-1 break-words">
-            {panelStatus.kind === 'upload-error' ? 'Upload failed: ' : 'Delete failed: '}
+            {panelStatus.kind === 'upload-error' ? 'Upload failed: ' : 'Action failed: '}
             {panelStatus.message}
           </span>
           <button
@@ -109,7 +109,9 @@ export default function ExplorerPanel() {
               localId={env.local_id}
               actions={env.actions}
               actionCount={env.actions.length}
-              onDeleteError={(message) => setPanelStatus({ kind: 'delete-error', message })}
+              version={env.version}
+              lastModifiedDate={env.last_modified_date}
+              onActionError={(message) => setPanelStatus({ kind: 'action-error', message })}
             />
           ))}
         {!isLoading && !isError && tree.length === 0 && (

@@ -9,7 +9,8 @@
     "composite": true,
     "verbatimModuleSyntax": false,
     "baseUrl": ".",
-    "paths": { "@/*": ["./src/*"] }
+    "paths": { "@/*": ["./src/*"] },
+    "types": ["@testing-library/jest-dom"]
   },
   "include": ["src/**/*"]
 }

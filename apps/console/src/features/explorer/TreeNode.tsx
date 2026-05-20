@@ -1,9 +1,20 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { ChevronRight, ChevronDown, Trash2 } from 'lucide-react'
-import { cn } from '@trajectory/ui'
+import { ChevronRight, ChevronDown, MoreHorizontal, Download, FileText, Trash2 } from 'lucide-react'
+import {
+  cn,
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '@trajectory/ui'
 import { usePanelContext } from '@/layout/PanelContext'
-import { useDeleteEnvironment } from '@/features/environments/hooks'
+import {
+  useDeleteEnvironment,
+  useExportEnvironment,
+  useGenerateEnvironmentReport,
+} from '@/features/environments/hooks'
 import type { ExplorerAction } from './hooks'
 
 // ISA-88 states per visibility
@@ -33,22 +44,27 @@ export function EnvironmentNode({
   localId,
   actions,
   actionCount,
-  onDeleteError,
+  version,
+  lastModifiedDate,
+  onActionError,
 }: {
   oid: string
   localId: string
   actions: ExplorerAction[]
   actionCount: number
-  onDeleteError?: (message: string) => void
+  version: string
+  lastModifiedDate: string | null
+  onActionError?: (message: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const navigate = useNavigate()
   const params = useParams()
   const deleteMutation = useDeleteEnvironment()
+  const exportHook = useExportEnvironment(oid, localId)
+  const reportHook = useGenerateEnvironmentReport(oid, localId)
   const Chevron = expanded ? ChevronDown : ChevronRight
 
-  async function handleDelete(e: React.MouseEvent) {
-    e.stopPropagation()
+  async function handleDelete() {
     const confirmed = window.confirm(
       `Delete environment "${localId}"?\n\nThis will permanently remove the environment, all of its actions, and every saved code version. This cannot be undone.`
     )
@@ -56,9 +72,29 @@ export function EnvironmentNode({
     try {
       await deleteMutation.mutateAsync(oid)
     } catch (err) {
-      onDeleteError?.(err instanceof Error ? err.message : 'Delete failed')
+      onActionError?.(err instanceof Error ? err.message : 'Delete failed')
     }
   }
+
+  async function handleExport() {
+    try {
+      await exportHook.run()
+    } catch (err) {
+      onActionError?.(err instanceof Error ? err.message : 'Export failed')
+    }
+  }
+
+  async function handleReport() {
+    try {
+      await reportHook.run()
+    } catch (err) {
+      onActionError?.(err instanceof Error ? err.message : 'PDF report failed')
+    }
+  }
+
+  const busyExport = exportHook.isPending
+  const busyReport = reportHook.isPending
+  const busyDelete = deleteMutation.isPending
 
   return (
     <div>
@@ -76,15 +112,36 @@ export function EnvironmentNode({
             {actionCount}
           </span>
         )}
-        <button
-          type="button"
-          onClick={(e) => void handleDelete(e)}
-          disabled={deleteMutation.isPending}
-          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive disabled:opacity-50 disabled:cursor-wait transition-opacity shrink-0"
-          title={`Delete environment "${localId}"`}
-        >
-          <Trash2 size={12} />
-        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              onClick={(e) => e.stopPropagation()}
+              aria-label="Environment actions"
+              className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity shrink-0"
+            >
+              <MoreHorizontal size={14} />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+            <DropdownMenuItem disabled={busyExport} onSelect={handleExport}>
+              <Download size={14} className="mr-2" />
+              {busyExport ? 'Export environment — Working…' : 'Export environment'}
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={busyReport} onSelect={handleReport}>
+              <FileText size={14} className="mr-2" />
+              {busyReport ? 'Generate PDF report — Working…' : 'Generate PDF report'}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem disabled={busyDelete} variant="destructive" onSelect={handleDelete}>
+              <Trash2 size={14} className="mr-2" />
+              {busyDelete ? 'Delete environment — Working…' : 'Delete environment'}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <div className="pl-5 pr-2 text-[10px] text-muted-foreground" style={{ cursor: 'default' }}>
+        [v{version}] imported {formatShortDate(lastModifiedDate)}
       </div>
       {expanded &&
         actions.map((action) => (
@@ -92,6 +149,19 @@ export function EnvironmentNode({
         ))}
     </div>
   )
+}
+
+function formatShortDate(iso: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  // Use UTC methods so the date doesn't shift based on the local timezone
+  const m = d.getUTCMonth() + 1
+  const day = d.getUTCDate()
+  const year = d.getUTCFullYear()
+  const nowYear = new Date().getUTCFullYear()
+  if (year === nowYear) return `${m}/${day}`
+  return `${m}/${day}/${String(year).slice(2)}`
 }
 
 // ---- Action Node ----
