@@ -221,6 +221,15 @@ export const api = {
     })
   },
 
+  exportEnvironmentBundle: async (oid: string): Promise<Blob> => {
+    const res = await fetch(`${BASE}/environments/${oid}/export-bundle`)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: { message: res.statusText } }))
+      throw new Error(err?.error?.message ?? `HTTP ${res.status}`)
+    }
+    return res.blob()
+  },
+
   exportSnapshotUrl: (): string => `${BASE}/snapshot/export`,
 
   importSnapshot: async (file: File): Promise<ImportSnapshotResult> => {
