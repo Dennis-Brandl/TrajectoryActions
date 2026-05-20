@@ -5,26 +5,22 @@ import { MemoryRouter } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { EnvironmentNode } from './TreeNode'
 
+const deleteMutateAsync = vi.fn().mockResolvedValue({})
+const exportRun = vi.fn().mockResolvedValue(undefined)
+const reportRun = vi.fn().mockResolvedValue(undefined)
+
 vi.mock('@/features/environments/hooks', () => ({
-  useDeleteEnvironment: () => ({
-    mutateAsync: vi.fn().mockResolvedValue({}),
-    isPending: false,
-  }),
-  useExportEnvironment: () => ({
-    run: vi.fn().mockResolvedValue(undefined),
-    isPending: false,
-    error: null,
-  }),
-  useGenerateEnvironmentReport: () => ({
-    run: vi.fn().mockResolvedValue(undefined),
-    isPending: false,
-    error: null,
-  }),
+  useDeleteEnvironment: () => ({ mutateAsync: deleteMutateAsync, isPending: false }),
+  useExportEnvironment: () => ({ run: exportRun, isPending: false, error: null }),
+  useGenerateEnvironmentReport: () => ({ run: reportRun, isPending: false, error: null }),
 }))
 
 // Mock @trajectory/ui DropdownMenu primitives to avoid cross-repo React
 // instance conflicts (the package is symlinked from TrajectoryEditor which has
 // its own node_modules/react, causing "Invalid hook call" in tests).
+// Note: this mock always renders DropdownMenuContent's children, so the
+// "opens menu" assertion verifies item presence after render, not the
+// click-to-open semantic.
 vi.mock('@trajectory/ui', async (importOriginal) => {
   const original = await importOriginal<typeof import('@trajectory/ui')>()
   return {
@@ -83,6 +79,9 @@ function renderWithProviders(ui: React.ReactElement) {
 describe('EnvironmentNode', () => {
   beforeEach(() => {
     vi.spyOn(window, 'confirm').mockImplementation(() => true)
+    deleteMutateAsync.mockClear()
+    exportRun.mockClear()
+    reportRun.mockClear()
   })
 
   const baseProps = {
@@ -121,5 +120,8 @@ describe('EnvironmentNode', () => {
     expect(window.confirm).toHaveBeenCalledWith(
       expect.stringContaining('Delete environment "TestEnv"')
     )
+    await waitFor(() => {
+      expect(deleteMutateAsync).toHaveBeenCalledWith('env-oid')
+    })
   })
 })

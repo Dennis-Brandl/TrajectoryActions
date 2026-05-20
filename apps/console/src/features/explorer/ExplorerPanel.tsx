@@ -74,7 +74,7 @@ export default function ExplorerPanel() {
         />
       </div>
 
-      {/* Status row (upload progress / upload or delete errors) */}
+      {/* Status row (upload progress / upload or action errors) */}
       {panelStatus.kind === 'uploading' && (
         <div className="px-3 py-1 text-[11px] text-muted-foreground border-b border-border shrink-0">
           Uploading {panelStatus.filename}…

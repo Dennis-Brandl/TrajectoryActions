@@ -140,7 +140,7 @@ export function EnvironmentNode({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <div className="pl-5 pr-2 text-[10px] text-muted-foreground" style={{ cursor: 'default' }}>
+      <div className="pl-5 pr-2 text-[10px] text-muted-foreground cursor-default">
         [v{version}] imported {formatShortDate(lastModifiedDate)}
       </div>
       {expanded &&
