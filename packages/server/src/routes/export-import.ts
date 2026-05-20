@@ -270,14 +270,14 @@ export function createExportImportRouter(
   })
 
   // --------------------------------------------------------
-  // GET /environments/:oid/export-bundle — Download .WFenvirBundle ZIP
+  // GET /environments/:oid/export-bundle — Download .WFenvirBundleX ZIP
   // --------------------------------------------------------
 
   async function buildEnvironmentBundle(envOid: string): Promise<{
     buffer: Buffer
     filename: string
     manifest: {
-      format: 'WFenvirBundle'
+      format: 'WFenvirBundleX'
       format_version: 1
       exported_at: string
       container_version: string
@@ -337,10 +337,10 @@ export function createExportImportRouter(
       }
     }
 
-    // .WFenvirBundle is a new format. format_version is an integer (1, 2, …) —
+    // .WFenvirBundleX is a new format. format_version is an integer (1, 2, …) —
     // intentionally simpler than the legacy snapshot's "1.0" string convention.
     const manifest = {
-      format: 'WFenvirBundle' as const,
+      format: 'WFenvirBundleX' as const,
       format_version: 1 as const,
       exported_at: new Date().toISOString(),
       container_version: '1.0.0',
@@ -352,7 +352,7 @@ export function createExportImportRouter(
     zip.file('manifest.json', JSON.stringify(manifest, null, 2))
 
     const buffer = await zip.generateAsync({ type: 'nodebuffer' })
-    const filename = `${env.local_id}.WFenvirBundle`
+    const filename = `${env.local_id}.WFenvirBundleX`
     return { buffer, filename, manifest }
   }
 

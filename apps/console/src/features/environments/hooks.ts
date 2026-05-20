@@ -48,7 +48,7 @@ export function useExportEnvironment(oid: string, localId: string) {
     setError(null)
     try {
       const blob = await api.exportEnvironmentBundle(oid)
-      triggerDownload(blob, `${localId}.WFenvirBundle`)
+      triggerDownload(blob, `${localId}.WFenvirBundleX`)
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err))
       setError(e)

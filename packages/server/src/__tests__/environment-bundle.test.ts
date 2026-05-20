@@ -191,7 +191,7 @@ describe('environment-bundle export', () => {
     expect(res.body.error.code).toBe('NOT_FOUND')
   })
 
-  it('emits a valid .WFenvirBundle ZIP with manifest + inner .WFenvir + code', async () => {
+  it('emits a valid .WFenvirBundleX ZIP with manifest + inner .WFenvir + code', async () => {
     const res = await request(harness.app)
       .get(`/management/v1/environments/${harness.envOid}/export-bundle`)
       .responseType('blob')
@@ -199,7 +199,7 @@ describe('environment-bundle export', () => {
     expect(res.status).toBe(200)
     expect(res.headers['content-type']).toMatch(/application\/zip/)
     expect(res.headers['content-disposition']).toBe(
-      'attachment; filename="KitchenLite.WFenvirBundle"'
+      'attachment; filename="KitchenLite.WFenvirBundleX"'
     )
 
     const zip = await JSZip.loadAsync(res.body as Buffer)
@@ -207,7 +207,7 @@ describe('environment-bundle export', () => {
     const manifestEntry = zip.file('manifest.json')
     expect(manifestEntry).not.toBeNull()
     const manifest = JSON.parse(await manifestEntry!.async('text'))
-    expect(manifest.format).toBe('WFenvirBundle')
+    expect(manifest.format).toBe('WFenvirBundleX')
     expect(manifest.format_version).toBe(1)
     expect(manifest.environment_oid).toBe(harness.envOid)
     expect(manifest.environment_local_id).toBe('KitchenLite')
@@ -251,19 +251,19 @@ describe('environment-bundle export', () => {
   it('rejects upload with no inner .WFenvir entry', async () => {
     // Build a malformed bundle: ZIP missing the inner .WFenvir
     const zip = new JSZip()
-    zip.file('manifest.json', JSON.stringify({ format: 'WFenvirBundle', format_version: 1 }))
+    zip.file('manifest.json', JSON.stringify({ format: 'WFenvirBundleX', format_version: 1 }))
     zip.file('code/abc/STARTING.py', '# orphan')
     const buf = await zip.generateAsync({ type: 'nodebuffer' })
 
     const res = await request(harness.app)
       .post('/management/v1/upload')
-      .attach('files', buf, 'Malformed.WFenvirBundle')
+      .attach('files', buf, 'Malformed.WFenvirBundleX')
 
     expect(res.status).toBe(400)
     expect(res.body.error.message).toMatch(/inner|envir|missing/i)
   })
 
-  it('accepts .WFenvirBundle through the upload allowlist', async () => {
+  it('accepts .WFenvirBundleX through the upload allowlist', async () => {
     // Use the exported bundle from a seeded env as input.
     const exportRes = await request(harness.app)
       .get(`/management/v1/environments/${harness.envOid}/export-bundle`)
@@ -275,7 +275,7 @@ describe('environment-bundle export', () => {
 
     const uploadRes = await request(harness.app)
       .post('/management/v1/upload')
-      .attach('files', exportRes.body, 'KitchenLite.WFenvirBundle')
+      .attach('files', exportRes.body, 'KitchenLite.WFenvirBundleX')
 
     expect(uploadRes.status).toBe(200)
 
@@ -293,7 +293,7 @@ describe('environment-bundle export', () => {
 
   it('rejects upload of a bundle whose inner .WFenvir has an unsupported schemaVersion', async () => {
     const zip = new JSZip()
-    zip.file('manifest.json', JSON.stringify({ format: 'WFenvirBundle', format_version: 1 }))
+    zip.file('manifest.json', JSON.stringify({ format: 'WFenvirBundleX', format_version: 1 }))
     zip.file(
       'Bad.WFenvir',
       JSON.stringify({
@@ -309,7 +309,7 @@ describe('environment-bundle export', () => {
 
     const res = await request(harness.app)
       .post('/management/v1/upload')
-      .attach('files', buf, 'Bad.WFenvirBundle')
+      .attach('files', buf, 'Bad.WFenvirBundleX')
 
     expect(res.status).toBe(400)
     expect(res.body.error.message).toMatch(/schemaVersion/i)
@@ -334,7 +334,7 @@ describe('environment-bundle export', () => {
     // Re-upload
     const uploadRes = await request(harness.app)
       .post('/management/v1/upload')
-      .attach('files', exportRes.body, 'KitchenLite.WFenvirBundle')
+      .attach('files', exportRes.body, 'KitchenLite.WFenvirBundleX')
     expect(uploadRes.status).toBe(200)
 
     // Verify env exists and has the same shape
@@ -403,7 +403,7 @@ describe('environment-bundle export', () => {
 
     const uploadRes = await request(harness.app)
       .post('/management/v1/upload')
-      .attach('files', exportRes.body, 'NoCode.WFenvirBundle')
+      .attach('files', exportRes.body, 'NoCode.WFenvirBundleX')
     expect(uploadRes.status).toBe(200)
 
     // Env exists, action exists, no code versions

@@ -7,7 +7,7 @@ async function buildFixtureBundle(): Promise<Blob> {
   zip.file(
     'manifest.json',
     JSON.stringify({
-      format: 'WFenvirBundle',
+      format: 'WFenvirBundleX',
       format_version: 1,
       exported_at: '2026-05-19T00:00:00.000Z',
       container_version: '1.0.0',
@@ -56,7 +56,7 @@ describe('parseEnvirBundle', () => {
     const blob = await buildFixtureBundle()
     const bundle: EnvirBundle = await parseEnvirBundle(blob)
 
-    expect(bundle.manifest.format).toBe('WFenvirBundle')
+    expect(bundle.manifest.format).toBe('WFenvirBundleX')
     expect(bundle.manifest.environment_oid).toBe('env-oid')
 
     expect(bundle.environment.local_id).toBe('TestEnv')
@@ -75,14 +75,14 @@ describe('parseEnvirBundle', () => {
 
   it('throws on missing inner .WFenvir', async () => {
     const zip = new JSZip()
-    zip.file('manifest.json', JSON.stringify({ format: 'WFenvirBundle', format_version: 1 }))
+    zip.file('manifest.json', JSON.stringify({ format: 'WFenvirBundleX', format_version: 1 }))
     const blob = await zip.generateAsync({ type: 'blob' })
     await expect(parseEnvirBundle(blob)).rejects.toThrow(/\.WFenvir/)
   })
 
   it('throws on empty environment_specifications array', async () => {
     const zip = new JSZip()
-    zip.file('manifest.json', JSON.stringify({ format: 'WFenvirBundle', format_version: 1 }))
+    zip.file('manifest.json', JSON.stringify({ format: 'WFenvirBundleX', format_version: 1 }))
     zip.file('Empty.WFenvir', JSON.stringify({ environment_specifications: [] }))
     const blob = await zip.generateAsync({ type: 'blob' })
     await expect(parseEnvirBundle(blob)).rejects.toThrow(/environment/i)

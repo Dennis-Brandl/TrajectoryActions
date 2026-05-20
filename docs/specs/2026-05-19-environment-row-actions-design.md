@@ -25,7 +25,7 @@ For this feature we introduce a new bundle extension that is a single self-conta
 ## Goals
 
 1. Mirror Trajectory Editor's `MoreHorizontal` + Radix `DropdownMenu` row-action pattern so users moving between consoles get a consistent affordance.
-2. Add a per-environment export endpoint that emits a new `.WFenvirBundle` ZIP — a single-file round-trip artifact containing both env metadata and all action code. Extend the existing upload handler to accept the new extension.
+2. Add a per-environment export endpoint that emits a new `.WFenvirBundleX` ZIP — a single-file round-trip artifact containing both env metadata and all action code. Extend the existing upload handler to accept the new extension.
 3. Generate a single-document PDF report listing each action in the environment with its parameters and the active code segment for each state. Generation runs in the browser via `jsPDF` (same library Trajectory Editor uses).
 4. Display `[v{version}] imported {MM/DD}` under the env name. No schema change — values come from existing `EnvironmentSummary` fields.
 5. Preserve the existing delete UX (`window.confirm` + `useDeleteEnvironment` + error bubble to parent).
@@ -60,12 +60,12 @@ Two-line row. Line 1 keeps the existing layout — chevron, name (truncated, fle
 
 Sourced from `@trajectory/ui` (`DropdownMenu`, `DropdownMenuTrigger`, `DropdownMenuContent`, `DropdownMenuItem`, `DropdownMenuSeparator`). `DropdownMenuContent align="end"`. Item order:
 
-| Item                | Icon (lucide-react) | On select                                                                                         |
-| ------------------- | ------------------- | ------------------------------------------------------------------------------------------------- |
-| Export environment  | `Download`          | `useExportEnvironment(oid, localId).run()` — downloads `<localId>.WFenvirBundle`.                 |
-| Generate PDF report | `FileText`          | `useGenerateEnvironmentReport(oid, localId).run()` — fetches the same bundle, parses, builds PDF. |
-| — separator —       |                     |                                                                                                   |
-| Delete environment  | `Trash2`            | Same `window.confirm` + `useDeleteEnvironment` flow as today. Item uses `variant="destructive"`.  |
+| Item                 | Icon (lucide-react) | On select                                                                                         |
+| -------------------- | ------------------- | ------------------------------------------------------------------------------------------------- |
+| Export Envir Package | `Download`          | `useExportEnvironment(oid, localId).run()` — downloads `<localId>.WFenvirBundleX`.                |
+| Generate PDF report  | `FileText`          | `useGenerateEnvironmentReport(oid, localId).run()` — fetches the same bundle, parses, builds PDF. |
+| — separator —        |                     |                                                                                                   |
+| Delete environment   | `Trash2`            | Same `window.confirm` + `useDeleteEnvironment` flow as today. Item uses `variant="destructive"`.  |
 
 While either of the two work-doing items is pending, the corresponding item renders disabled with its label suffixed " — Working…". On error, the message bubbles through the existing `EnvironmentNode` callback (see [Error surfacing](#error-surfacing)).
 
@@ -80,15 +80,15 @@ While either of the two work-doing items is pending, the corresponding item rend
 `GET /management/v1/environments/:oid/export-bundle` in `packages/server/src/routes/export-import.ts`, adjacent to the existing snapshot and per-action exports.
 
 - **Auth:** matches the existing `/management/v1/*` posture — the management router is mounted without `createApiKeyAuth` in `packages/server/src/index.ts`, so this route is unauthenticated like its siblings.
-- **Response:** `200` with `Content-Type: application/zip` and `Content-Disposition: attachment; filename="<local_id>.WFenvirBundle"` (filename URL-encoded for safety). `404` if env not found.
+- **Response:** `200` with `Content-Type: application/zip` and `Content-Disposition: attachment; filename="<local_id>.WFenvirBundleX"` (filename URL-encoded for safety). `404` if env not found.
 - **Body:** binary ZIP buffer.
 
-### `.WFenvirBundle` ZIP layout
+### `.WFenvirBundleX` ZIP layout
 
 A new bundle extension. The inner files are deliberately the same shapes the existing upload handler already understands for `.WFenvir` JSON and `.WFactionCodeX` ZIPs — this lets us reuse most of the existing import code.
 
 ```
-<local_id>.WFenvirBundle/
+<local_id>.WFenvirBundleX/
 ├── manifest.json
 ├── <local_id>.WFenvir
 └── code/
@@ -101,7 +101,7 @@ A new bundle extension. The inner files are deliberately the same shapes the exi
 - **`manifest.json`** (bundle metadata, distinct from the inner `.WFenvir`):
   ```json
   {
-    "format": "WFenvirBundle",
+    "format": "WFenvirBundleX",
     "format_version": 1,
     "exported_at": "2026-05-19T17:04:22.000Z",
     "container_version": "0.0.1",
@@ -136,7 +136,7 @@ Internally it composes the inner `.WFenvir` JSON the same way the existing `.WFs
 ```ts
 | {
     file: Express.Multer.File
-    type: 'wfenvirbundle'
+    type: 'wfenvirbundlex'
     data: Record<string, unknown>  // the inner .WFenvir JSON object (library shape)
     schemaVersion: string
     codeByActionOid: Record<string, Array<{ state: string; source: string }>>
@@ -148,24 +148,24 @@ Parsing branch (mirrors the existing `.WFenvirX` branch, plus code collection):
 1. Unzip the outer bundle with `JSZip.loadAsync(file.buffer)`.
 2. Find the inner `*.WFenvir` entry using the same name-suffix check as `.WFenvirX` → parse as JSON, validate the same required fields (`local_id`, `oid`, `version`, `last_modified_date`, `environment_specifications`).
 3. Walk every `code/<action_oid>/<state>.py` entry; group sources by action OID into `codeByActionOid`.
-4. Push one `ParsedFile` of type `'wfenvirbundle'` carrying the parsed env-library JSON, schema version, and the code map.
+4. Push one `ParsedFile` of type `'wfenvirbundlex'` carrying the parsed env-library JSON, schema version, and the code map.
 
-The existing transaction code (which loops over parsed files and writes envs, actions, and code) gets one new branch: when it sees a `'wfenvirbundle'` parsed file, it:
+The existing transaction code (which loops over parsed files and writes envs, actions, and code) gets one new branch: when it sees a `'wfenvirbundlex'` parsed file, it:
 
 1. Processes the inner env JSON exactly like the existing `'wfenvir'` / `'wfenvirx'` branch (upsert env, upsert actions).
 2. For each upserted action, looks up `codeByActionOid[action.oid]`. If the array exists, creates initial code versions (one per state) for that action — mirrors the logic in the existing `'wfactioncodex'` branch.
 
-The extension allowlist at the top of the handler (currently `wfenvir | wfenvirx | wfaction | wfactioncodex`) gains `wfenvirbundle`. The validation error message updates to mention the new extension.
+The extension allowlist at the top of the handler (currently `wfenvir | wfenvirx | wfaction | wfactioncodex`) gains `wfenvirbundlex`. The validation error message updates to mention the new extension.
 
 ### Tests
 
 New file `packages/server/src/__tests__/environment-bundle.test.ts`. Cases:
 
-1. **Happy path export.** Export a seeded env; bundle contains `manifest.json` with `format: "WFenvirBundle"` + correct counts, an inner `<local_id>.WFenvir` whose `environment_specifications[0]` has the expected env + `included_actions`, and one `code/<oid>/<STATE>.py` per state-with-code. Counts in `manifest` match file contents.
+1. **Happy path export.** Export a seeded env; bundle contains `manifest.json` with `format: "WFenvirBundleX"` + correct counts, an inner `<local_id>.WFenvir` whose `environment_specifications[0]` has the expected env + `included_actions`, and one `code/<oid>/<STATE>.py` per state-with-code. Counts in `manifest` match file contents.
 2. **Empty env (zero actions).** Bundle is still valid; `manifest.action_count` and `code_file_count` are 0; the `code/` folder is empty or absent.
 3. **Unknown env oid.** 404 with the standard error envelope.
-4. **Round-trip.** Export env → `DELETE /management/v1/environments/:oid` → `POST /management/v1/environments/upload` with the exported `.WFenvirBundle` buffer. After upload, the env exists with the same `local_id`, the same number of actions with matching `local_id` and `action_visibility`, and each action's active code per state is byte-equal to the original source.
-5. **Upload extension allowlist.** `.WFenvirBundle` is accepted; the existing extensions still work; an invalid extension still 400s.
+4. **Round-trip.** Export env → `DELETE /management/v1/environments/:oid` → `POST /management/v1/environments/upload` with the exported `.WFenvirBundleX` buffer. After upload, the env exists with the same `local_id`, the same number of actions with matching `local_id` and `action_visibility`, and each action's active code per state is byte-equal to the original source.
+5. **Upload extension allowlist.** `.WFenvirBundleX` is accepted; the existing extensions still work; an invalid extension still 400s.
 6. **Malformed bundle.** Upload of a ZIP without an inner `*.WFenvir` returns 400 with a clear error message naming the file.
 7. **Round-trip without code.** Export → delete → re-upload an env that had zero authored code; env + actions return with no code versions; no spurious code rows.
 
@@ -185,12 +185,12 @@ New file `packages/server/src/__tests__/environment-bundle.test.ts`. Cases:
 
 ### Types
 
-The parsed bundle shape is derived from the `.WFenvirBundle` layout. Since the inner `.WFenvir` JSON uses the existing wire shape, most field definitions reuse the protocol's existing parameter-spec shape (`id` + `value_type` + `default_value` per `apps/console/src/lib/types.ts` `InputParameterSpec`).
+The parsed bundle shape is derived from the `.WFenvirBundleX` layout. Since the inner `.WFenvir` JSON uses the existing wire shape, most field definitions reuse the protocol's existing parameter-spec shape (`id` + `value_type` + `default_value` per `apps/console/src/lib/types.ts` `InputParameterSpec`).
 
 ```ts
 // apps/console/src/lib/envir-bundle.ts
 export interface BundleManifest {
-  format: 'WFenvirBundle'
+  format: 'WFenvirBundleX'
   format_version: number
   exported_at: string
   container_version: string
@@ -265,7 +265,7 @@ export function useExportEnvironment(
   error: Error | null
 }
 // 1. fetch GET /management/v1/environments/:oid/export-bundle → Blob
-// 2. triggerDownload(blob, `${localId}.WFenvirBundle`)
+// 2. triggerDownload(blob, `${localId}.WFenvirBundleX`)
 
 export function useGenerateEnvironmentReport(
   oid: string,
@@ -341,15 +341,15 @@ Per action:
 
 ### Manual smoke (post-merge)
 
-- Deploy Kitchen env via the existing upload path, then export via the new menu item, delete the env, re-upload the exported `.WFenvirBundle`, confirm the 10 Kitchen actions return with intact code (curl `/capabilities` count + spot-check one action's code).
+- Deploy Kitchen env via the existing upload path, then export via the new menu item, delete the env, re-upload the exported `.WFenvirBundleX`, confirm the 10 Kitchen actions return with intact code (curl `/capabilities` count + spot-check one action's code).
 - Generate the Kitchen PDF; eyeball all 10 actions with parameters and code segments rendered. Confirm long code wraps cleanly and the per-page header is correct.
 
 ## Acceptance criteria
 
 1. `EnvironmentNode` renders the two-line row with the metadata line under the name.
-2. The hover-revealed kebab opens a Radix `DropdownMenu` with three items: Export environment, Generate PDF report, Delete environment.
-3. `GET /management/v1/environments/:oid/export-bundle` returns a `.WFenvirBundle` ZIP matching the documented layout.
-4. The exported `.WFenvirBundle` round-trips through `POST /management/v1/environments/upload` — after delete + re-upload, the env returns with the same actions and byte-equal active code per state.
+2. The hover-revealed kebab opens a Radix `DropdownMenu` with three items: Export Envir Package, Generate PDF report, Delete environment.
+3. `GET /management/v1/environments/:oid/export-bundle` returns a `.WFenvirBundleX` ZIP matching the documented layout.
+4. The exported `.WFenvirBundleX` round-trips through `POST /management/v1/environments/upload` — after delete + re-upload, the env returns with the same actions and byte-equal active code per state.
 5. Generate PDF report produces a single-document PDF listing each action's parameters and code segments per the [PDF content](#pdf-content) layout.
 6. Existing delete UX is preserved (`window.confirm`, error bubble, no surprise behavior).
 7. `tsc -b` clean. Vitest server + client suites pass with the new tests added.
@@ -360,7 +360,7 @@ Per action:
 1. **Bundle weight.** `jspdf` + `jszip` are not trivial. Mitigated by lazy `import()` inside the hooks; verified by `npm run build --workspace=@trajectory/console` showing the main chunk unchanged and a new lazy chunk created.
 2. **jsPDF Unicode.** Built-in fonts are WinAnsi only — non-Latin characters in code or descriptions get rendered as `?`. Documented as a known limitation for this iteration.
 3. **Large environments.** A 50-action env with ~10 KB code per state could produce a 5–10 MB PDF held in browser memory. Acceptable for current scenarios; we revisit if it becomes a real problem.
-4. **Extension allowlist regex.** Existing extension check uses `ext === 'wfenvir' | 'wfenvirx' | ...`. Adding `'wfenvirbundle'` is a literal compare so no overlap risk. The detection branch inside the parser must be ordered so `wfenvirbundle` is checked before any prefix-match logic if introduced later.
+4. **Extension allowlist regex.** Existing extension check uses `ext === 'wfenvir' | 'wfenvirx' | ...`. Adding `'wfenvirbundlex'` is a literal compare so no overlap risk. The detection branch inside the parser must be ordered so `wfenvirbundlex` is checked before any prefix-match logic if introduced later.
 5. **Round-trip OID identity.** The bundle preserves env + action OIDs. If a re-upload happens while a previous instance of the env still exists (the user forgot to delete), the upload upserts in place — same behavior as today's `.WFenvirX` upload. Documented as expected.
 6. **Two-line row height regression.** Tree gets taller per env; could affect scroll feel with many envs. Eyeball with Warehouse + Kitchen both deployed and adjust line-height if needed.
 
@@ -369,7 +369,7 @@ Per action:
 **Server:**
 
 - `packages/server/src/routes/export-import.ts` — add `GET /environments/:oid/export-bundle` route + `buildEnvironmentBundle` helper.
-- `packages/server/src/routes/management.ts` — extend upload extension allowlist to include `wfenvirbundle`; add `'wfenvirbundle'` branch to the `ParsedFile` union + parsing loop + transaction loop.
+- `packages/server/src/routes/management.ts` — extend upload extension allowlist to include `wfenvirbundlex`; add `'wfenvirbundlex'` branch to the `ParsedFile` union + parsing loop + transaction loop.
 - `packages/server/src/__tests__/environment-bundle.test.ts` — **new**.
 
 **Client:**

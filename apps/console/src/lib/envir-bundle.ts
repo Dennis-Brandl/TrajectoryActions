@@ -7,7 +7,7 @@
 import JSZip from 'jszip'
 
 export interface BundleManifest {
-  format: 'WFenvirBundle'
+  format: 'WFenvirBundleX'
   format_version: number
   exported_at: string
   container_version: string

@@ -233,12 +233,12 @@ export function createManagementRouter(
           ext !== 'wfenvirx' &&
           ext !== 'wfaction' &&
           ext !== 'wfactioncodex' &&
-          ext !== 'wfenvirbundle'
+          ext !== 'wfenvirbundlex'
         ) {
           return void res.status(400).json({
             error: {
               code: 'VALIDATION_ERROR',
-              message: `Invalid file extension for "${file.originalname}". Expected .WFenvir, .WFenvirX, .WFaction, .WFactionCodeX, or .WFenvirBundle`,
+              message: `Invalid file extension for "${file.originalname}". Expected .WFenvir, .WFenvirX, .WFaction, .WFactionCodeX, or .WFenvirBundleX`,
               details: { filename: file.originalname },
             },
           })
@@ -271,7 +271,7 @@ export function createManagementRouter(
           }
         | {
             file: Express.Multer.File
-            type: 'wfenvirbundle'
+            type: 'wfenvirbundlex'
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             data: any // the inner .WFenvir JSON object (library shape)
             schemaVersion: string
@@ -401,7 +401,7 @@ export function createManagementRouter(
           continue
         }
 
-        if (ext === 'wfenvirbundle') {
+        if (ext === 'wfenvirbundlex') {
           let zip: JSZip
           try {
             zip = await JSZip.loadAsync(file.buffer)
@@ -514,7 +514,7 @@ export function createManagementRouter(
             ;(codeByActionOid[actionOid] ??= []).push({ state, source })
           }
 
-          parsed.push({ file, type: 'wfenvirbundle', data: lib, schemaVersion, codeByActionOid })
+          parsed.push({ file, type: 'wfenvirbundlex', data: lib, schemaVersion, codeByActionOid })
           continue
         }
 
@@ -724,7 +724,7 @@ export function createManagementRouter(
       const diffs: DiffSummary[] = []
 
       // Helper: upsert one env spec + its actions; return the list of upserted action OIDs.
-      // Used by both the wfenvir branch and the new wfenvirbundle branch.
+      // Used by both the wfenvir branch and the new wfenvirbundlex branch.
       const processEnvSpec = (
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         envData: Record<string, any>,
@@ -827,7 +827,7 @@ export function createManagementRouter(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const envData = item.data as Record<string, any>
             processEnvSpec(envData, item.schemaVersion as string, item.file.originalname)
-          } else if (item.type === 'wfenvirbundle') {
+          } else if (item.type === 'wfenvirbundlex') {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const lib = item.data as Record<string, any>
             // eslint-disable-next-line @typescript-eslint/no-explicit-any

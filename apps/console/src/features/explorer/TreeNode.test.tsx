@@ -106,7 +106,7 @@ describe('EnvironmentNode', () => {
     const trigger = screen.getByRole('button', { name: /environment actions/i })
     fireEvent.click(trigger)
     await waitFor(() => {
-      expect(screen.getByText('Export environment')).toBeInTheDocument()
+      expect(screen.getByText('Export Envir Package')).toBeInTheDocument()
       expect(screen.getByText('Generate PDF report')).toBeInTheDocument()
       expect(screen.getByText('Delete environment')).toBeInTheDocument()
     })

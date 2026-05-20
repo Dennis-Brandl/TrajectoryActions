@@ -126,7 +126,7 @@ export function EnvironmentNode({
           <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
             <DropdownMenuItem disabled={busyExport} onSelect={handleExport}>
               <Download size={14} className="mr-2" />
-              {busyExport ? 'Export environment — Working…' : 'Export environment'}
+              {busyExport ? 'Export Envir Package — Working…' : 'Export Envir Package'}
             </DropdownMenuItem>
             <DropdownMenuItem disabled={busyReport} onSelect={handleReport}>
               <FileText size={14} className="mr-2" />

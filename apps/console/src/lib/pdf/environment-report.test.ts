@@ -4,7 +4,7 @@ import type { EnvirBundle } from '../envir-bundle'
 
 const FIXTURE: EnvirBundle = {
   manifest: {
-    format: 'WFenvirBundle',
+    format: 'WFenvirBundleX',
     format_version: 1,
     exported_at: '2026-05-19T00:00:00.000Z',
     container_version: '1.0.0',

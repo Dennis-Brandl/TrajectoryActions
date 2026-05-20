@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a kebab-icon dropdown to every environment row in the console's left tree with three actions (Export → `.WFenvirBundle`, Generate PDF report, Delete), plus a metadata line `[v{version}] imported {MM/DD}` under the env name. Introduce a new `.WFenvirBundle` ZIP format that is round-trippable through the existing upload endpoint.
+**Goal:** Add a kebab-icon dropdown to every environment row in the console's left tree with three actions (Export → `.WFenvirBundleX`, Generate PDF report, Delete), plus a metadata line `[v{version}] imported {MM/DD}` under the env name. Introduce a new `.WFenvirBundleX` ZIP format that is round-trippable through the existing upload endpoint.
 
-**Architecture:** One new server route in `createExportImportRouter` (`GET /environments/:oid/export-bundle`) backed by a `buildEnvironmentBundle` helper that mirrors how the existing `.WFsnapshot` exporter composes per-env JSON + per-action code. One new branch in the upload handler (`'wfenvirbundle'`) parses the bundle and reuses the existing env-upsert + code-creation logic from the `'wfenvirx'` and `'wfactioncodex'` branches. Client-side, two lazy-loaded modules (`envir-bundle.ts` for parsing, `pdf/environment-report.ts` for jsPDF generation), two imperative hooks (`useExportEnvironment`, `useGenerateEnvironmentReport`), and a rewrite of `EnvironmentNode` to use `@trajectory/ui`'s `DropdownMenu` primitives.
+**Architecture:** One new server route in `createExportImportRouter` (`GET /environments/:oid/export-bundle`) backed by a `buildEnvironmentBundle` helper that mirrors how the existing `.WFsnapshot` exporter composes per-env JSON + per-action code. One new branch in the upload handler (`'wfenvirbundlex'`) parses the bundle and reuses the existing env-upsert + code-creation logic from the `'wfenvirx'` and `'wfactioncodex'` branches. Client-side, two lazy-loaded modules (`envir-bundle.ts` for parsing, `pdf/environment-report.ts` for jsPDF generation), two imperative hooks (`useExportEnvironment`, `useGenerateEnvironmentReport`), and a rewrite of `EnvironmentNode` to use `@trajectory/ui`'s `DropdownMenu` primitives.
 
 **Tech Stack:** TypeScript 5, Express, JSZip (server), Vitest (server + client), React 19, `@trajectory/ui` DropdownMenu (Radix), `jspdf` (new — client, lazy), `jszip` (promoted — client, lazy).
 
@@ -28,7 +28,7 @@
 | File                                                       | Role                                                                                                                             |
 | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `packages/server/src/routes/export-import.ts`              | **EDIT.** Add `GET /environments/:oid/export-bundle` route + `buildEnvironmentBundle` helper.                                    |
-| `packages/server/src/routes/management.ts`                 | **EDIT.** Allowlist `wfenvirbundle`; add `'wfenvirbundle'` ParsedFile variant + parsing branch + transaction-loop branch.        |
+| `packages/server/src/routes/management.ts`                 | **EDIT.** Allowlist `wfenvirbundlex`; add `'wfenvirbundlex'` ParsedFile variant + parsing branch + transaction-loop branch.      |
 | `packages/server/src/__tests__/environment-bundle.test.ts` | **NEW.** 7 cases: happy-path export, empty env, 404, round-trip with code, allowlist, malformed bundle, round-trip without code. |
 | `apps/console/package.json`                                | **EDIT.** Add `jspdf` + `jszip` as direct dependencies.                                                                          |
 | `apps/console/src/lib/download.ts`                         | **NEW.** `triggerDownload(blob, filename)` helper.                                                                               |
@@ -212,21 +212,21 @@ describe('environment-bundle export', () => {
     expect(res.body.error.code).toBe('NOT_FOUND')
   })
 
-  it('emits a valid .WFenvirBundle ZIP with manifest + inner .WFenvir + code', async () => {
+  it('emits a valid .WFenvirBundleX ZIP with manifest + inner .WFenvir + code', async () => {
     const res = await request(harness.app)
       .get(`/management/v1/environments/${harness.envOid}/export-bundle`)
       .responseType('blob')
 
     expect(res.status).toBe(200)
     expect(res.headers['content-type']).toMatch(/application\/zip/)
-    expect(res.headers['content-disposition']).toContain('.WFenvirBundle')
+    expect(res.headers['content-disposition']).toContain('.WFenvirBundleX')
 
     const zip = await JSZip.loadAsync(res.body)
     // Manifest
     const manifestEntry = zip.file('manifest.json')
     expect(manifestEntry).not.toBeNull()
     const manifest = JSON.parse(await manifestEntry!.async('text'))
-    expect(manifest.format).toBe('WFenvirBundle')
+    expect(manifest.format).toBe('WFenvirBundleX')
     expect(manifest.format_version).toBe(1)
     expect(manifest.environment_oid).toBe(harness.envOid)
     expect(manifest.environment_local_id).toBe('KitchenLite')
@@ -271,7 +271,7 @@ async function buildEnvironmentBundle(envOid: string): Promise<{
   buffer: Buffer
   filename: string
   manifest: {
-    format: 'WFenvirBundle'
+    format: 'WFenvirBundleX'
     format_version: 1
     exported_at: string
     container_version: string
@@ -333,7 +333,7 @@ async function buildEnvironmentBundle(envOid: string): Promise<{
   }
 
   const manifest = {
-    format: 'WFenvirBundle' as const,
+    format: 'WFenvirBundleX' as const,
     format_version: 1 as const,
     exported_at: new Date().toISOString(),
     container_version: '1.0.0',
@@ -345,7 +345,7 @@ async function buildEnvironmentBundle(envOid: string): Promise<{
   zip.file('manifest.json', JSON.stringify(manifest, null, 2))
 
   const buffer = await zip.generateAsync({ type: 'nodebuffer' })
-  const filename = `${env.local_id}.WFenvirBundle`
+  const filename = `${env.local_id}.WFenvirBundleX`
   return { buffer, filename, manifest }
 }
 ```
@@ -354,7 +354,7 @@ Add the route just after the existing `/snapshot/import` definition:
 
 ```typescript
 // --------------------------------------------------------
-// GET /environments/:oid/export-bundle — Download .WFenvirBundle ZIP
+// GET /environments/:oid/export-bundle — Download .WFenvirBundleX ZIP
 // --------------------------------------------------------
 router.get('/environments/:oid/export-bundle', (req, res, next) => {
   const oid = req.params.oid as string
@@ -399,7 +399,7 @@ Expected: total green count = prior baseline + 2.
 ```bash
 git add packages/server/src/routes/export-import.ts \
         packages/server/src/__tests__/environment-bundle.test.ts
-git commit -m "feat(server): add GET /environments/:oid/export-bundle for .WFenvirBundle download"
+git commit -m "feat(server): add GET /environments/:oid/export-bundle for .WFenvirBundleX download"
 ```
 
 ---
@@ -470,12 +470,12 @@ Expected: 3 passing tests. If the empty-env case fails, fix `buildEnvironmentBun
 
 ```bash
 git add packages/server/src/__tests__/environment-bundle.test.ts
-git commit -m "test(server): cover .WFenvirBundle export of empty environment"
+git commit -m "test(server): cover .WFenvirBundleX export of empty environment"
 ```
 
 ---
 
-### Task A3: Upload-handler extension — `'wfenvirbundle'` parsing branch
+### Task A3: Upload-handler extension — `'wfenvirbundlex'` parsing branch
 
 **Files:**
 
@@ -489,19 +489,19 @@ Append to `packages/server/src/__tests__/environment-bundle.test.ts`:
 it('rejects upload with no inner .WFenvir entry', async () => {
   // Build a malformed bundle: ZIP missing the inner .WFenvir
   const zip = new JSZip()
-  zip.file('manifest.json', JSON.stringify({ format: 'WFenvirBundle', format_version: 1 }))
+  zip.file('manifest.json', JSON.stringify({ format: 'WFenvirBundleX', format_version: 1 }))
   zip.file('code/abc/STARTING.py', '# orphan')
   const buf = await zip.generateAsync({ type: 'nodebuffer' })
 
   const res = await request(harness.app)
     .post('/management/v1/environments/upload')
-    .attach('files', buf, 'Malformed.WFenvirBundle')
+    .attach('files', buf, 'Malformed.WFenvirBundleX')
 
   expect(res.status).toBe(400)
   expect(res.body.error.message).toMatch(/inner|envir|missing/i)
 })
 
-it('accepts .WFenvirBundle through the upload allowlist', async () => {
+it('accepts .WFenvirBundleX through the upload allowlist', async () => {
   // Use the exported bundle from a seeded env as input.
   const exportRes = await request(harness.app)
     .get(`/management/v1/environments/${harness.envOid}/export-bundle`)
@@ -513,7 +513,7 @@ it('accepts .WFenvirBundle through the upload allowlist', async () => {
 
   const uploadRes = await request(harness.app)
     .post('/management/v1/environments/upload')
-    .attach('files', exportRes.body, 'KitchenLite.WFenvirBundle')
+    .attach('files', exportRes.body, 'KitchenLite.WFenvirBundleX')
 
   expect(uploadRes.status).toBe(200)
 })
@@ -549,12 +549,12 @@ if (
   ext !== 'wfenvirx' &&
   ext !== 'wfaction' &&
   ext !== 'wfactioncodex' &&
-  ext !== 'wfenvirbundle'
+  ext !== 'wfenvirbundlex'
 ) {
   return void res.status(400).json({
     error: {
       code: 'VALIDATION_ERROR',
-      message: `Invalid file extension for "${file.originalname}". Expected .WFenvir, .WFenvirX, .WFaction, .WFactionCodeX, or .WFenvirBundle`,
+      message: `Invalid file extension for "${file.originalname}". Expected .WFenvir, .WFenvirX, .WFaction, .WFactionCodeX, or .WFenvirBundleX`,
       details: { filename: file.originalname },
     },
   })
@@ -577,7 +577,7 @@ type ParsedFile =
     }
   | {
       file: Express.Multer.File
-      type: 'wfenvirbundle'
+      type: 'wfenvirbundlex'
       data: any // the inner .WFenvir JSON object (library shape)
       schemaVersion: string
       codeByActionOid: Record<string, Array<{ state: string; source: string }>>
@@ -589,7 +589,7 @@ type ParsedFile =
 After the existing `wfactioncodex` branch (around line 393), add:
 
 ```typescript
-if (ext === 'wfenvirbundle') {
+if (ext === 'wfenvirbundlex') {
   let zip: JSZip
   try {
     zip = await JSZip.loadAsync(file.buffer)
@@ -676,7 +676,7 @@ if (ext === 'wfenvirbundle') {
     ;(codeByActionOid[actionOid] ??= []).push({ state, source })
   }
 
-  parsed.push({ file, type: 'wfenvirbundle', data: lib, schemaVersion, codeByActionOid })
+  parsed.push({ file, type: 'wfenvirbundlex', data: lib, schemaVersion, codeByActionOid })
   continue
 }
 ```
@@ -687,19 +687,19 @@ if (ext === 'wfenvirbundle') {
 npm test --workspace=@trajectory/server -- environment-bundle
 ```
 
-Expected: the malformed-bundle test passes (400 with "no inner \*.WFenvir"). The allowlist test still fails because the parsed file is pushed but the transaction loop has no `'wfenvirbundle'` branch yet — the upload returns 200 with empty imported summary (silent no-op), so `expect(uploadRes.status).toBe(200)` passes accidentally but the round-trip data check (Task A4) will catch it.
+Expected: the malformed-bundle test passes (400 with "no inner \*.WFenvir"). The allowlist test still fails because the parsed file is pushed but the transaction loop has no `'wfenvirbundlex'` branch yet — the upload returns 200 with empty imported summary (silent no-op), so `expect(uploadRes.status).toBe(200)` passes accidentally but the round-trip data check (Task A4) will catch it.
 
 - [ ] **Step 7: Commit**
 
 ```bash
 git add packages/server/src/routes/management.ts \
         packages/server/src/__tests__/environment-bundle.test.ts
-git commit -m "feat(server): parse .WFenvirBundle uploads (allowlist + ParsedFile + extraction)"
+git commit -m "feat(server): parse .WFenvirBundleX uploads (allowlist + ParsedFile + extraction)"
 ```
 
 ---
 
-### Task A4: Upload-handler — transaction-loop branch for `'wfenvirbundle'`
+### Task A4: Upload-handler — transaction-loop branch for `'wfenvirbundlex'`
 
 **Files:**
 
@@ -729,7 +729,7 @@ it('round-trips: export → delete → re-upload restores env + actions + code',
   // Re-upload
   const uploadRes = await request(harness.app)
     .post('/management/v1/environments/upload')
-    .attach('files', exportRes.body, 'KitchenLite.WFenvirBundle')
+    .attach('files', exportRes.body, 'KitchenLite.WFenvirBundleX')
   expect(uploadRes.status).toBe(200)
 
   // Verify env exists and has the same shape
@@ -800,7 +800,7 @@ it('round-trips an env with no code (no spurious code rows)', async () => {
 
   const uploadRes = await request(harness.app)
     .post('/management/v1/environments/upload')
-    .attach('files', exportRes.body, 'NoCode.WFenvirBundle')
+    .attach('files', exportRes.body, 'NoCode.WFenvirBundleX')
   expect(uploadRes.status).toBe(200)
 
   // Verify env exists and action has no states_with_code
@@ -823,16 +823,16 @@ Expected: both round-trip tests fail. The first fails because re-uploaded env ma
 
 In `management.ts`, find the loop that processes `parsed` files into the database (after parsing, inside the transaction). The existing structure is around lines 538+ where it iterates `for (const p of parsed)` and switches on `p.type`. Add the new branch alongside `'wfenvir'`/`'wfenvirx'`/`'wfaction'`/`'wfactioncodex'`:
 
-> Implementation note: the existing `'wfenvirx'` branch already processes `environment_specifications[]` and `included_actions[]`. Refactor the env-processing block of `'wfenvirx'` into a local helper `processEnvLibrary(lib, schemaVersion)` returning a list of upserted `{ actionOid, action }` records, then call it from both `'wfenvirx'` and the new `'wfenvirbundle'` branch. The `'wfenvirbundle'` branch additionally creates initial code versions from `codeByActionOid`.
+> Implementation note: the existing `'wfenvirx'` branch already processes `environment_specifications[]` and `included_actions[]`. Refactor the env-processing block of `'wfenvirx'` into a local helper `processEnvLibrary(lib, schemaVersion)` returning a list of upserted `{ actionOid, action }` records, then call it from both `'wfenvirx'` and the new `'wfenvirbundlex'` branch. The `'wfenvirbundlex'` branch additionally creates initial code versions from `codeByActionOid`.
 
 Concrete plan (the actual storage API is `codeVersionRepo.saveAndActivate(input: CodeVersionInput)` where `CodeVersionInput = { action_oid, state, source_code, created_by?, description? }` — verified against `packages/storage/src/repositories/code-version.repository.ts:212` and `packages/storage/src/types.ts:233`):
 
 **Step 5a — extract a `processEnvLibrary` helper from the existing `'wfenvirx'` branch.** Find the body of the `'wfenvirx'` branch in the transaction loop. Move the inner env-spec/action-spec upsert loop into a local closure named `processEnvLibrary(lib, schemaVersion)` that returns the array of `{ actionOid: string }` it upserted (keep the existing side effects on imported counts intact). Replace the inlined body in the `'wfenvirx'` branch with a call to this helper. This refactor is a no-op for `'wfenvirx'` behavior — the existing tests in `management.test.ts` and the scenario suites will catch any regression.
 
-**Step 5b — add the `'wfenvirbundle'` branch using the helper:**
+**Step 5b — add the `'wfenvirbundlex'` branch using the helper:**
 
 ```typescript
-if (p.type === 'wfenvirbundle') {
+if (p.type === 'wfenvirbundlex') {
   const upserted = processEnvLibrary(p.data, p.schemaVersion)
   for (const { actionOid } of upserted) {
     const codeFiles = p.codeByActionOid[actionOid] ?? []
@@ -841,7 +841,7 @@ if (p.type === 'wfenvirbundle') {
         action_oid: actionOid,
         state: cf.state,
         source_code: cf.source,
-        description: 'imported from .WFenvirBundle',
+        description: 'imported from .WFenvirBundleX',
       })
     }
   }
@@ -875,7 +875,7 @@ Expected: prior baseline + 7 new = full green count.
 ```bash
 git add packages/server/src/routes/management.ts \
         packages/server/src/__tests__/environment-bundle.test.ts
-git commit -m "feat(server): import .WFenvirBundle uploads (env + actions + code round-trip)"
+git commit -m "feat(server): import .WFenvirBundleX uploads (env + actions + code round-trip)"
 ```
 
 ---
@@ -959,7 +959,7 @@ async function buildFixtureBundle(): Promise<Blob> {
   zip.file(
     'manifest.json',
     JSON.stringify({
-      format: 'WFenvirBundle',
+      format: 'WFenvirBundleX',
       format_version: 1,
       exported_at: '2026-05-19T00:00:00.000Z',
       container_version: '1.0.0',
@@ -1008,7 +1008,7 @@ describe('parseEnvirBundle', () => {
     const blob = await buildFixtureBundle()
     const bundle: EnvirBundle = await parseEnvirBundle(blob)
 
-    expect(bundle.manifest.format).toBe('WFenvirBundle')
+    expect(bundle.manifest.format).toBe('WFenvirBundleX')
     expect(bundle.manifest.environment_oid).toBe('env-oid')
 
     expect(bundle.environment.local_id).toBe('TestEnv')
@@ -1027,14 +1027,14 @@ describe('parseEnvirBundle', () => {
 
   it('throws on missing inner .WFenvir', async () => {
     const zip = new JSZip()
-    zip.file('manifest.json', JSON.stringify({ format: 'WFenvirBundle', format_version: 1 }))
+    zip.file('manifest.json', JSON.stringify({ format: 'WFenvirBundleX', format_version: 1 }))
     const blob = await zip.generateAsync({ type: 'blob' })
     await expect(parseEnvirBundle(blob)).rejects.toThrow(/\.WFenvir/)
   })
 
   it('throws on empty environment_specifications array', async () => {
     const zip = new JSZip()
-    zip.file('manifest.json', JSON.stringify({ format: 'WFenvirBundle', format_version: 1 }))
+    zip.file('manifest.json', JSON.stringify({ format: 'WFenvirBundleX', format_version: 1 }))
     zip.file('Empty.WFenvir', JSON.stringify({ environment_specifications: [] }))
     const blob = await zip.generateAsync({ type: 'blob' })
     await expect(parseEnvirBundle(blob)).rejects.toThrow(/environment/i)
@@ -1056,7 +1056,7 @@ Expected: failure with module-not-found error.
 import JSZip from 'jszip'
 
 export interface BundleManifest {
-  format: 'WFenvirBundle'
+  format: 'WFenvirBundleX'
   format_version: number
   exported_at: string
   container_version: string
@@ -1179,7 +1179,7 @@ Expected: 4 tests pass.
 
 ```bash
 git add apps/console/src/lib/envir-bundle.ts apps/console/src/lib/envir-bundle.test.ts
-git commit -m "feat(console): add parseEnvirBundle + types for .WFenvirBundle"
+git commit -m "feat(console): add parseEnvirBundle + types for .WFenvirBundleX"
 ```
 
 ---
@@ -1202,7 +1202,7 @@ import type { EnvirBundle } from '../envir-bundle'
 
 const FIXTURE: EnvirBundle = {
   manifest: {
-    format: 'WFenvirBundle',
+    format: 'WFenvirBundleX',
     format_version: 1,
     exported_at: '2026-05-19T00:00:00.000Z',
     container_version: '1.0.0',
@@ -1681,7 +1681,7 @@ export function useExportEnvironment(oid: string, localId: string) {
         throw new Error(body.error?.message ?? `Export failed: HTTP ${res.status}`)
       }
       const blob = await res.blob()
-      triggerDownload(blob, `${localId}.WFenvirBundle`)
+      triggerDownload(blob, `${localId}.WFenvirBundleX`)
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)))
       throw err
@@ -1840,7 +1840,7 @@ describe('EnvironmentNode', () => {
     const trigger = screen.getByRole('button', { name: /environment actions/i })
     fireEvent.click(trigger)
     await waitFor(() => {
-      expect(screen.getByText('Export environment')).toBeInTheDocument()
+      expect(screen.getByText('Export Envir Package')).toBeInTheDocument()
       expect(screen.getByText('Generate PDF report')).toBeInTheDocument()
       expect(screen.getByText('Delete environment')).toBeInTheDocument()
     })
@@ -1979,7 +1979,7 @@ export function EnvironmentNode({
           <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
             <DropdownMenuItem disabled={busyExport} onSelect={handleExport}>
               <Download size={14} className="mr-2" />
-              {busyExport ? 'Export environment — Working…' : 'Export environment'}
+              {busyExport ? 'Export Envir Package — Working…' : 'Export Envir Package'}
             </DropdownMenuItem>
             <DropdownMenuItem disabled={busyReport} onSelect={handleReport}>
               <FileText size={14} className="mr-2" />
@@ -2149,8 +2149,8 @@ Open `http://localhost:5176`. In the left tree, hover over an env row (Warehouse
 
 1. **Two-line layout** — env name on line 1; `[v{version}] imported {MM/DD}` on line 2 in muted micro-type.
 2. **Kebab visible on hover** at the right edge of line 1, hidden otherwise.
-3. **Clicking the kebab opens a dropdown** with three items in order: Export environment, Generate PDF report, ―separator―, Delete environment.
-4. **Export** downloads `<localId>.WFenvirBundle`. Open the ZIP in any tool; verify `manifest.json` + `<localId>.WFenvir` + `code/<oid>/<STATE>.py` entries match the env's content.
+3. **Clicking the kebab opens a dropdown** with three items in order: Export Envir Package, Generate PDF report, ―separator―, Delete environment.
+4. **Export** downloads `<localId>.WFenvirBundleX`. Open the ZIP in any tool; verify `manifest.json` + `<localId>.WFenvir` + `code/<oid>/<STATE>.py` entries match the env's content.
 5. **Generate PDF report** downloads `<localId>-report.pdf`. Open it; verify the cover page lists actions, each action shows parameters + code segments, page numbers are correct.
 6. **Delete** still prompts via `window.confirm`, errors still surface in whatever UI the panel uses for delete errors.
 
@@ -2158,7 +2158,7 @@ Open `http://localhost:5176`. In the left tree, hover over an env row (Warehouse
 
 1. Export Kitchen env.
 2. Click Delete on Kitchen env (confirm). Kitchen disappears.
-3. Drag the downloaded `KitchenLite.WFenvirBundle` (well, `Kitchen-something.WFenvirBundle`) onto the upload affordance in the console.
+3. Drag the downloaded `KitchenLite.WFenvirBundleX` (well, `Kitchen-something.WFenvirBundleX`) onto the upload affordance in the console.
 4. Verify the env reappears with all 10 actions and code intact (spot-check one action's code via the action detail view).
 
 - [ ] **Step 5: Optional — STATE.md update**
