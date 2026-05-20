@@ -474,8 +474,33 @@ export function createManagementRouter(
               })
             }
           }
-          const schemaVersion =
-            typeof lib['schemaVersion'] === 'string' ? lib['schemaVersion'] : '4.0'
+          // schemaVersion is optional. When present, gate against legacy 2.0/below;
+          // when absent, default to "4.0" (mirrors the .WFenvirX branch).
+          const rawSchemaVersion = lib['schemaVersion'] as unknown
+          let schemaVersion: string
+          if (rawSchemaVersion === undefined) {
+            schemaVersion = '4.0'
+          } else if (typeof rawSchemaVersion !== 'string') {
+            return void res.status(400).json({
+              error: {
+                code: 'VALIDATION_ERROR',
+                message: `schemaVersion must be a string in "${file.originalname}"`,
+                details: { filename: file.originalname, schemaVersion: rawSchemaVersion },
+              },
+            })
+          } else {
+            const ver = parseFloat(rawSchemaVersion)
+            if (Number.isNaN(ver) || ver < 3.0) {
+              return void res.status(400).json({
+                error: {
+                  code: 'VALIDATION_ERROR',
+                  message: `Unsupported schemaVersion "${rawSchemaVersion}" in "${file.originalname}". Minimum accepted version is "3.0".`,
+                  details: { filename: file.originalname, schemaVersion: rawSchemaVersion },
+                },
+              })
+            }
+            schemaVersion = rawSchemaVersion
+          }
 
           // Collect code files grouped by action OID
           const codeByActionOid: Record<string, Array<{ state: string; source: string }>> = {}

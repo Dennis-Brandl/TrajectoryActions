@@ -278,6 +278,43 @@ describe('environment-bundle export', () => {
       .attach('files', exportRes.body, 'KitchenLite.WFenvirBundle')
 
     expect(uploadRes.status).toBe(200)
+
+    // A3 only parses the bundle into a ParsedFile; A4 will add the
+    // transaction-loop branch that creates DB rows. At this point a
+    // re-upload should be a silent no-op — the env should NOT have been
+    // re-created by the upload.
+    const afterRes = await request(harness.app).get(`/management/v1/environments/${harness.envOid}`)
+    expect(afterRes.status).toBe(404)
+
+    // Also confirm a known-absent OID is still absent (sanity check).
+    const afterEmptyRes = await request(harness.app).get(
+      '/management/v1/environments/44444444-4444-4444-4444-444444444444'
+    )
+    expect(afterEmptyRes.status).toBe(404)
+  })
+
+  it('rejects upload of a bundle whose inner .WFenvir has an unsupported schemaVersion', async () => {
+    const zip = new JSZip()
+    zip.file('manifest.json', JSON.stringify({ format: 'WFenvirBundle', format_version: 1 }))
+    zip.file(
+      'Bad.WFenvir',
+      JSON.stringify({
+        local_id: 'Bad',
+        oid: 'bad-oid',
+        version: '1',
+        last_modified_date: '2026-05-19T00:00:00.000Z',
+        schemaVersion: '2.0',
+        environment_specifications: [],
+      })
+    )
+    const buf = await zip.generateAsync({ type: 'nodebuffer' })
+
+    const res = await request(harness.app)
+      .post('/management/v1/upload')
+      .attach('files', buf, 'Bad.WFenvirBundle')
+
+    expect(res.status).toBe(400)
+    expect(res.body.error.message).toMatch(/schemaVersion/i)
   })
 
   it('emits a valid bundle for an empty env (zero actions)', async () => {
