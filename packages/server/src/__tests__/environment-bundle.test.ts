@@ -281,12 +281,20 @@ describe('environment-bundle export', () => {
 
     expect(res.status).toBe(200)
     const zip = await JSZip.loadAsync(res.body)
-    const manifest = JSON.parse(await zip.file('manifest.json')!.async('text'))
+    const manifestEntry = zip.file('manifest.json')
+    expect(manifestEntry).not.toBeNull()
+    const manifest = JSON.parse(await manifestEntry!.async('text'))
     expect(manifest.action_count).toBe(0)
     expect(manifest.code_file_count).toBe(0)
 
     // No code files should exist
     const codeEntries = Object.keys(zip.files).filter((n) => n.startsWith('code/'))
     expect(codeEntries).toHaveLength(0)
+
+    const innerEntry = zip.file('EmptyLite.WFenvir')
+    expect(innerEntry).not.toBeNull()
+    const innerJson = JSON.parse(await innerEntry!.async('text'))
+    expect(innerJson.environment_specifications).toHaveLength(1)
+    expect(innerJson.environment_specifications[0].included_actions).toEqual([])
   })
 })
