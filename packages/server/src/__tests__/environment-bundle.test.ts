@@ -248,6 +248,38 @@ describe('environment-bundle export', () => {
     expect(chopFile).toBeNull()
   })
 
+  it('rejects upload with no inner .WFenvir entry', async () => {
+    // Build a malformed bundle: ZIP missing the inner .WFenvir
+    const zip = new JSZip()
+    zip.file('manifest.json', JSON.stringify({ format: 'WFenvirBundle', format_version: 1 }))
+    zip.file('code/abc/STARTING.py', '# orphan')
+    const buf = await zip.generateAsync({ type: 'nodebuffer' })
+
+    const res = await request(harness.app)
+      .post('/management/v1/upload')
+      .attach('files', buf, 'Malformed.WFenvirBundle')
+
+    expect(res.status).toBe(400)
+    expect(res.body.error.message).toMatch(/inner|envir|missing/i)
+  })
+
+  it('accepts .WFenvirBundle through the upload allowlist', async () => {
+    // Use the exported bundle from a seeded env as input.
+    const exportRes = await request(harness.app)
+      .get(`/management/v1/environments/${harness.envOid}/export-bundle`)
+      .responseType('blob')
+    expect(exportRes.status).toBe(200)
+
+    // Delete the env so the upload re-creates it
+    await request(harness.app).delete(`/management/v1/environments/${harness.envOid}`).expect(200)
+
+    const uploadRes = await request(harness.app)
+      .post('/management/v1/upload')
+      .attach('files', exportRes.body, 'KitchenLite.WFenvirBundle')
+
+    expect(uploadRes.status).toBe(200)
+  })
+
   it('emits a valid bundle for an empty env (zero actions)', async () => {
     // Seed a second env with no actions
     const emptyEnvPayload = {

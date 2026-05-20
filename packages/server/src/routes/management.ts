@@ -232,12 +232,13 @@ export function createManagementRouter(
           ext !== 'wfenvir' &&
           ext !== 'wfenvirx' &&
           ext !== 'wfaction' &&
-          ext !== 'wfactioncodex'
+          ext !== 'wfactioncodex' &&
+          ext !== 'wfenvirbundle'
         ) {
           return void res.status(400).json({
             error: {
               code: 'VALIDATION_ERROR',
-              message: `Invalid file extension for "${file.originalname}". Expected .WFenvir, .WFenvirX, .WFaction, or .WFactionCodeX`,
+              message: `Invalid file extension for "${file.originalname}". Expected .WFenvir, .WFenvirX, .WFaction, .WFactionCodeX, or .WFenvirBundle`,
               details: { filename: file.originalname },
             },
           })
@@ -267,6 +268,14 @@ export function createManagementRouter(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             data: any
             codeFiles: Array<{ state: string; source: string }>
+          }
+        | {
+            file: Express.Multer.File
+            type: 'wfenvirbundle'
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            data: any // the inner .WFenvir JSON object (library shape)
+            schemaVersion: string
+            codeByActionOid: Record<string, Array<{ state: string; source: string }>>
           }
 
       const parsed: ParsedFile[] = []
@@ -389,6 +398,98 @@ export function createManagementRouter(
           }
 
           parsed.push({ file, type: 'wfactioncodex', data: codexObj, codeFiles })
+          continue
+        }
+
+        if (ext === 'wfenvirbundle') {
+          let zip: JSZip
+          try {
+            zip = await JSZip.loadAsync(file.buffer)
+          } catch {
+            return void res.status(400).json({
+              error: {
+                code: 'VALIDATION_ERROR',
+                message: `Failed to read ZIP archive in "${file.originalname}"`,
+                details: { filename: file.originalname },
+              },
+            })
+          }
+
+          // Find the inner *.WFenvir entry
+          const innerEntry = Object.values(zip.files).find((entry) => {
+            if (entry.dir) return false
+            const innerExt = entry.name.split('.').pop()?.toLowerCase() ?? ''
+            return innerExt === 'wfenvir'
+          })
+          if (!innerEntry) {
+            return void res.status(400).json({
+              error: {
+                code: 'VALIDATION_ERROR',
+                message: `Bundle "${file.originalname}" has no inner *.WFenvir entry`,
+                details: { filename: file.originalname },
+              },
+            })
+          }
+
+          let libData: unknown
+          try {
+            libData = JSON.parse(await innerEntry.async('text'))
+          } catch {
+            return void res.status(400).json({
+              error: {
+                code: 'VALIDATION_ERROR',
+                message: `Failed to parse inner .WFenvir JSON in "${file.originalname}"`,
+                details: { filename: file.originalname },
+              },
+            })
+          }
+          if (typeof libData !== 'object' || libData === null) {
+            return void res.status(400).json({
+              error: {
+                code: 'VALIDATION_ERROR',
+                message: `Inner .WFenvir in "${file.originalname}" must contain a JSON object`,
+                details: { filename: file.originalname },
+              },
+            })
+          }
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const lib = libData as Record<string, any>
+
+          // Validate the same required fields as .WFenvirX
+          const libRequired = [
+            'local_id',
+            'oid',
+            'version',
+            'last_modified_date',
+            'environment_specifications',
+          ]
+          for (const field of libRequired) {
+            if (lib[field] === undefined) {
+              return void res.status(400).json({
+                error: {
+                  code: 'VALIDATION_ERROR',
+                  message: `Missing required field "${field}" in inner .WFenvir of "${file.originalname}"`,
+                  details: { filename: file.originalname },
+                },
+              })
+            }
+          }
+          const schemaVersion =
+            typeof lib['schemaVersion'] === 'string' ? lib['schemaVersion'] : '4.0'
+
+          // Collect code files grouped by action OID
+          const codeByActionOid: Record<string, Array<{ state: string; source: string }>> = {}
+          for (const entry of Object.values(zip.files)) {
+            if (entry.dir) continue
+            const match = /^code\/([^/]+)\/([^/]+)\.py$/.exec(entry.name)
+            if (!match) continue
+            const actionOid = match[1]!
+            const state = match[2]!
+            const source = await entry.async('text')
+            ;(codeByActionOid[actionOid] ??= []).push({ state, source })
+          }
+
+          parsed.push({ file, type: 'wfenvirbundle', data: lib, schemaVersion, codeByActionOid })
           continue
         }
 
