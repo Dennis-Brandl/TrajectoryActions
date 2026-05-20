@@ -337,6 +337,8 @@ export function createExportImportRouter(
       }
     }
 
+    // .WFenvirBundle is a new format. format_version is an integer (1, 2, …) —
+    // intentionally simpler than the legacy snapshot's "1.0" string convention.
     const manifest = {
       format: 'WFenvirBundle' as const,
       format_version: 1 as const,
@@ -365,7 +367,7 @@ export function createExportImportRouter(
         }
         res.set({
           'Content-Type': 'application/zip',
-          'Content-Disposition': `attachment; filename="${encodeURIComponent(result.filename)}"`,
+          'Content-Disposition': `attachment; filename="${result.filename}"`,
           'Content-Length': String(result.buffer.length),
         })
         res.send(result.buffer)

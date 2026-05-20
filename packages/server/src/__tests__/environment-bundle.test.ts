@@ -198,7 +198,9 @@ describe('environment-bundle export', () => {
 
     expect(res.status).toBe(200)
     expect(res.headers['content-type']).toMatch(/application\/zip/)
-    expect(res.headers['content-disposition']).toContain('.WFenvirBundle')
+    expect(res.headers['content-disposition']).toBe(
+      'attachment; filename="KitchenLite.WFenvirBundle"'
+    )
 
     const zip = await JSZip.loadAsync(res.body as Buffer)
 
@@ -215,8 +217,25 @@ describe('environment-bundle export', () => {
     const innerEntry = zip.file('KitchenLite.WFenvir')
     expect(innerEntry).not.toBeNull()
     const innerJson = JSON.parse(await innerEntry!.async('text'))
+    // Top-level library fields the upload handler requires
+    expect(innerJson.oid).toBe(harness.envOid)
+    expect(innerJson.local_id).toBe('KitchenLite')
+    expect(innerJson.version).toBe('1')
+    expect(innerJson.last_modified_date).toBeTruthy()
+    expect(innerJson.schemaVersion).toBe('4.0')
     expect(innerJson.environment_specifications).toHaveLength(1)
-    expect(innerJson.environment_specifications[0].included_actions).toHaveLength(2)
+
+    // Inner env spec
+    const envSpec = innerJson.environment_specifications[0]
+    expect(envSpec.oid).toBe(harness.envOid)
+    expect(envSpec.local_id).toBe('KitchenLite')
+    expect(envSpec.included_actions).toHaveLength(2)
+
+    // Spot-check one included action's parameter specs round-tripped
+    const boil = envSpec.included_actions.find((a: { local_id: string }) => a.local_id === 'Boil')
+    expect(boil).toBeTruthy()
+    expect(boil.input_parameter_specifications).toHaveLength(1)
+    expect(boil.input_parameter_specifications[0].id).toBe('temp')
 
     const boilStarting = zip.file(`code/${harness.actionOids[0]}/STARTING.py`)
     const boilExecuting = zip.file(`code/${harness.actionOids[0]}/EXECUTING.py`)
