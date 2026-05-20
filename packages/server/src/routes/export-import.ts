@@ -214,6 +214,13 @@ export function createExportImportRouter(
           value_property_specifications: env.value_property_specifications,
           resource_property_specifications: env.resource_property_specifications,
           included_actions: actions.map((a) => ({
+            // action_name + action_library are required by Trajectory Editor's
+            // master-environment-library schema. action_name mirrors local_id
+            // ("when the action body is resolved"); action_library names the
+            // library this action belongs to — Action Container has no
+            // separate library concept, so we use the env's local_id.
+            action_name: a.local_id,
+            action_library: env.local_id,
             oid: a.oid,
             local_id: a.local_id,
             version: a.version,
@@ -298,6 +305,13 @@ export function createExportImportRouter(
           value_property_specifications: env.value_property_specifications,
           resource_property_specifications: env.resource_property_specifications,
           included_actions: actions.map((a) => ({
+            // action_name + action_library are required by Trajectory Editor's
+            // master-environment-library schema. action_name mirrors local_id
+            // ("when the action body is resolved"); action_library names the
+            // library this action belongs to — Action Container has no
+            // separate library concept, so we use the env's local_id.
+            action_name: a.local_id,
+            action_library: env.local_id,
             oid: a.oid,
             local_id: a.local_id,
             version: a.version,

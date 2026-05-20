@@ -237,6 +237,11 @@ describe('environment-bundle export', () => {
     expect(boil.input_parameter_specifications).toHaveLength(1)
     expect(boil.input_parameter_specifications[0].id).toBe('temp')
 
+    // Trajectory Editor schema compatibility (master-environment-library.json
+    // requires action_name + action_library on each included_action).
+    expect(boil.action_name).toBe('Boil')
+    expect(boil.action_library).toBe('KitchenLite')
+
     const boilStarting = zip.file(`code/${harness.actionOids[0]}/STARTING.py`)
     const boilExecuting = zip.file(`code/${harness.actionOids[0]}/EXECUTING.py`)
     expect(boilStarting).not.toBeNull()
@@ -509,7 +514,15 @@ describe('environment-bundle export', () => {
     expect(innerEntry).not.toBeNull()
     const innerJson = JSON.parse(await innerEntry!.async('text'))
     expect(innerJson.environment_specifications).toHaveLength(1)
-    expect(innerJson.environment_specifications[0].included_actions).toHaveLength(2)
+    const actions = innerJson.environment_specifications[0].included_actions
+    expect(actions).toHaveLength(2)
+
+    // Trajectory Editor schema compatibility (master-environment-library.json
+    // requires action_name + action_library on each included_action).
+    for (const a of actions) {
+      expect(a.action_name).toBe(a.local_id)
+      expect(a.action_library).toBe('KitchenLite')
+    }
   })
 
   it('GET /export-envir-x can round-trip through the existing upload handler', async () => {
