@@ -466,4 +466,78 @@ describe('environment-bundle export', () => {
     expect(innerJson.environment_specifications).toHaveLength(1)
     expect(innerJson.environment_specifications[0].included_actions).toEqual([])
   })
+
+  // ---- .WFenvirX export tests ----
+
+  it('GET /export-envir-x returns 404 for unknown env oid', async () => {
+    const res = await request(harness.app).get(
+      '/management/v1/environments/99999999-9999-9999-9999-999999999999/export-envir-x'
+    )
+    expect(res.status).toBe(404)
+    expect(res.body.error.code).toBe('NOT_FOUND')
+  })
+
+  it('GET /export-envir-x emits a valid .WFenvirX ZIP (env + actions, no code, no manifest)', async () => {
+    const res = await request(harness.app)
+      .get(`/management/v1/environments/${harness.envOid}/export-envir-x`)
+      .responseType('blob')
+
+    expect(res.status).toBe(200)
+    expect(res.headers['content-type']).toMatch(/application\/zip/)
+    expect(res.headers['content-disposition']).toBe('attachment; filename="KitchenLite.WFenvirX"')
+
+    const zip = await JSZip.loadAsync(res.body as Buffer)
+
+    // The ZIP must contain exactly one entry: KitchenLite.WFenvir
+    const entries = Object.keys(zip.files).filter((n) => !zip.files[n].dir)
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toBe('KitchenLite.WFenvir')
+
+    // No manifest.json
+    expect(zip.file('manifest.json')).toBeNull()
+
+    // No code/ directory entries
+    const codeEntries = Object.keys(zip.files).filter((n) => n.startsWith('code/'))
+    expect(codeEntries).toHaveLength(0)
+
+    // No .py files
+    const pyEntries = Object.keys(zip.files).filter((n) => n.endsWith('.py'))
+    expect(pyEntries).toHaveLength(0)
+
+    // Inner .WFenvir is valid JSON with correct structure
+    const innerEntry = zip.file('KitchenLite.WFenvir')
+    expect(innerEntry).not.toBeNull()
+    const innerJson = JSON.parse(await innerEntry!.async('text'))
+    expect(innerJson.environment_specifications).toHaveLength(1)
+    expect(innerJson.environment_specifications[0].included_actions).toHaveLength(2)
+  })
+
+  it('GET /export-envir-x can round-trip through the existing upload handler', async () => {
+    // Export the .WFenvirX
+    const exportRes = await request(harness.app)
+      .get(`/management/v1/environments/${harness.envOid}/export-envir-x`)
+      .responseType('blob')
+    expect(exportRes.status).toBe(200)
+
+    // Delete the env
+    await request(harness.app).delete(`/management/v1/environments/${harness.envOid}`).expect(200)
+
+    // Re-upload via the existing upload handler using a .WFenvirX filename
+    const uploadRes = await request(harness.app)
+      .post('/management/v1/upload')
+      .attach('files', exportRes.body as Buffer, 'KitchenLite.WFenvirX')
+    expect(uploadRes.status).toBe(200)
+
+    // Env is restored with 2 actions
+    const envRes = await request(harness.app)
+      .get(`/management/v1/environments/${harness.envOid}`)
+      .expect(200)
+    expect(envRes.body.data.local_id).toBe('KitchenLite')
+    expect(envRes.body.data.actions).toHaveLength(2)
+
+    // Actions have no code (states_with_code is empty) since .WFenvirX carries no code
+    for (const action of envRes.body.data.actions as Array<{ states_with_code: string[] }>) {
+      expect(action.states_with_code).toEqual([])
+    }
+  })
 })

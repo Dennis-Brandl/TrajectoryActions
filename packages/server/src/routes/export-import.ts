@@ -273,26 +273,15 @@ export function createExportImportRouter(
   // GET /environments/:oid/export-bundle — Download .WFenvirBundleX ZIP
   // --------------------------------------------------------
 
-  async function buildEnvironmentBundle(envOid: string): Promise<{
-    buffer: Buffer
+  function buildEnvLibraryJson(envOid: string): {
+    json: Record<string, unknown>
     filename: string
-    manifest: {
-      format: 'WFenvirBundleX'
-      format_version: 1
-      exported_at: string
-      container_version: string
-      environment_oid: string
-      environment_local_id: string
-      action_count: number
-      code_file_count: number
-    }
-  } | null> {
+    env: ReturnType<typeof environmentRepo.findByOid>
+  } | null {
     const env = environmentRepo.findByOid(envOid)
     if (!env) return null
-
     const actions = actionRepo.findByEnvironment(env.oid)
-
-    const innerEnvJson = {
+    const json = {
       local_id: env.local_id,
       oid: env.oid,
       version: env.version,
@@ -323,9 +312,31 @@ export function createExportImportRouter(
         },
       ],
     }
+    return { json, filename: `${env.local_id}.WFenvir`, env }
+  }
+
+  async function buildEnvironmentBundle(envOid: string): Promise<{
+    buffer: Buffer
+    filename: string
+    manifest: {
+      format: 'WFenvirBundleX'
+      format_version: 1
+      exported_at: string
+      container_version: string
+      environment_oid: string
+      environment_local_id: string
+      action_count: number
+      code_file_count: number
+    }
+  } | null> {
+    const lib = buildEnvLibraryJson(envOid)
+    if (!lib) return null
+
+    const env = lib.env!
+    const actions = actionRepo.findByEnvironment(env.oid)
 
     const zip = new JSZip()
-    zip.file(`${env.local_id}.WFenvir`, JSON.stringify(innerEnvJson, null, 2))
+    zip.file(lib.filename, JSON.stringify(lib.json, null, 2))
 
     let codeFileCount = 0
     for (const action of actions) {
@@ -359,6 +370,43 @@ export function createExportImportRouter(
   router.get('/environments/:oid/export-bundle', (req, res, next) => {
     const oid = req.params.oid as string
     buildEnvironmentBundle(oid)
+      .then((result) => {
+        if (!result) {
+          return void res.status(404).json({
+            error: { code: 'NOT_FOUND', message: `Environment not found: ${oid}` },
+          })
+        }
+        res.set({
+          'Content-Type': 'application/zip',
+          'Content-Disposition': `attachment; filename="${result.filename}"`,
+          'Content-Length': String(result.buffer.length),
+        })
+        res.send(result.buffer)
+      })
+      .catch(next)
+  })
+
+  // --------------------------------------------------------
+  // GET /environments/:oid/export-envir-x — Download .WFenvirX ZIP
+  // --------------------------------------------------------
+
+  async function buildEnvironmentEnvirX(envOid: string): Promise<{
+    buffer: Buffer
+    filename: string
+  } | null> {
+    const lib = buildEnvLibraryJson(envOid)
+    if (!lib) return null
+
+    const zip = new JSZip()
+    zip.file(lib.filename, JSON.stringify(lib.json, null, 2))
+
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' })
+    return { buffer, filename: `${lib.env!.local_id}.WFenvirX` }
+  }
+
+  router.get('/environments/:oid/export-envir-x', (req, res, next) => {
+    const oid = req.params.oid as string
+    buildEnvironmentEnvirX(oid)
       .then((result) => {
         if (!result) {
           return void res.status(404).json({

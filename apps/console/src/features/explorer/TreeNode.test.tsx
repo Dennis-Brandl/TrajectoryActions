@@ -7,11 +7,13 @@ import { EnvironmentNode } from './TreeNode'
 
 const deleteMutateAsync = vi.fn().mockResolvedValue({})
 const exportRun = vi.fn().mockResolvedValue(undefined)
+const envirXRun = vi.fn().mockResolvedValue(undefined)
 const reportRun = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('@/features/environments/hooks', () => ({
   useDeleteEnvironment: () => ({ mutateAsync: deleteMutateAsync, isPending: false }),
   useExportEnvironment: () => ({ run: exportRun, isPending: false, error: null }),
+  useExportEnvironmentEnvirX: () => ({ run: envirXRun, isPending: false, error: null }),
   useGenerateEnvironmentReport: () => ({ run: reportRun, isPending: false, error: null }),
 }))
 
@@ -81,6 +83,7 @@ describe('EnvironmentNode', () => {
     vi.spyOn(window, 'confirm').mockImplementation(() => true)
     deleteMutateAsync.mockClear()
     exportRun.mockClear()
+    envirXRun.mockClear()
     reportRun.mockClear()
   })
 
@@ -101,12 +104,13 @@ describe('EnvironmentNode', () => {
     expect(screen.getByText(/imported 5\/10/)).toBeInTheDocument()
   })
 
-  it('opens a dropdown menu with three items when the kebab is clicked', async () => {
+  it('opens a dropdown menu with four items when the kebab is clicked', async () => {
     renderWithProviders(<EnvironmentNode {...baseProps} />)
     const trigger = screen.getByRole('button', { name: /environment actions/i })
     fireEvent.click(trigger)
     await waitFor(() => {
       expect(screen.getByText('Export Envir Package')).toBeInTheDocument()
+      expect(screen.getByText('Export as .WFenvirX')).toBeInTheDocument()
       expect(screen.getByText('Generate PDF report')).toBeInTheDocument()
       expect(screen.getByText('Delete environment')).toBeInTheDocument()
     })

@@ -13,6 +13,7 @@ import { usePanelContext } from '@/layout/PanelContext'
 import {
   useDeleteEnvironment,
   useExportEnvironment,
+  useExportEnvironmentEnvirX,
   useGenerateEnvironmentReport,
 } from '@/features/environments/hooks'
 import type { ExplorerAction } from './hooks'
@@ -61,6 +62,7 @@ export function EnvironmentNode({
   const params = useParams()
   const deleteMutation = useDeleteEnvironment()
   const exportHook = useExportEnvironment(oid, localId)
+  const envirXHook = useExportEnvironmentEnvirX(oid, localId)
   const reportHook = useGenerateEnvironmentReport(oid, localId)
   const Chevron = expanded ? ChevronDown : ChevronRight
 
@@ -84,6 +86,14 @@ export function EnvironmentNode({
     }
   }
 
+  async function handleEnvirX() {
+    try {
+      await envirXHook.run()
+    } catch (err) {
+      onActionError?.(err instanceof Error ? err.message : 'WFenvirX export failed')
+    }
+  }
+
   async function handleReport() {
     try {
       await reportHook.run()
@@ -93,6 +103,7 @@ export function EnvironmentNode({
   }
 
   const busyExport = exportHook.isPending
+  const busyEnvirX = envirXHook.isPending
   const busyReport = reportHook.isPending
   const busyDelete = deleteMutation.isPending
 
@@ -127,6 +138,10 @@ export function EnvironmentNode({
             <DropdownMenuItem disabled={busyExport} onSelect={handleExport}>
               <Download size={14} className="mr-2" />
               {busyExport ? 'Export Envir Package — Working…' : 'Export Envir Package'}
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={busyEnvirX} onSelect={handleEnvirX}>
+              <Download size={14} className="mr-2" />
+              {busyEnvirX ? 'Export as .WFenvirX — Working…' : 'Export as .WFenvirX'}
             </DropdownMenuItem>
             <DropdownMenuItem disabled={busyReport} onSelect={handleReport}>
               <FileText size={14} className="mr-2" />

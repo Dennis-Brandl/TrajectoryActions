@@ -61,6 +61,28 @@ export function useExportEnvironment(oid: string, localId: string) {
   return { run, isPending, error }
 }
 
+export function useExportEnvironmentEnvirX(oid: string, localId: string) {
+  const [isPending, setIsPending] = useState(false)
+  const [error, setError] = useState<Error | null>(null)
+
+  const run = useCallback(async () => {
+    setIsPending(true)
+    setError(null)
+    try {
+      const blob = await api.exportEnvironmentEnvirX(oid)
+      triggerDownload(blob, `${localId}.WFenvirX`)
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err))
+      setError(e)
+      throw e
+    } finally {
+      setIsPending(false)
+    }
+  }, [oid, localId])
+
+  return { run, isPending, error }
+}
+
 export function useGenerateEnvironmentReport(oid: string, localId: string) {
   const [isPending, setIsPending] = useState(false)
   const [error, setError] = useState<Error | null>(null)

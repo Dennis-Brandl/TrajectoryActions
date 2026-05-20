@@ -230,6 +230,18 @@ export const api = {
     return res.blob()
   },
 
+  exportEnvironmentEnvirX: async (oid: string): Promise<Blob> => {
+    const res = await fetch(`${BASE}/environments/${oid}/export-envir-x`)
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(
+        (body as { error?: { message?: string } }).error?.message ??
+          `Export failed: HTTP ${res.status}`
+      )
+    }
+    return res.blob()
+  },
+
   exportSnapshotUrl: (): string => `${BASE}/snapshot/export`,
 
   importSnapshot: async (file: File): Promise<ImportSnapshotResult> => {
