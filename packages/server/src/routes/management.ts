@@ -723,100 +723,135 @@ export function createManagementRouter(
       const imported: ImportSummary[] = []
       const diffs: DiffSummary[] = []
 
+      // Helper: upsert one env spec + its actions; return the list of upserted action OIDs.
+      // Used by both the wfenvir branch and the new wfenvirbundle branch.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const processEnvSpec = (
+        envData: Record<string, any>,
+        schemaVersion: string,
+        sourceFilename: string
+      ): string[] => {
+        // Get existing actions for diff computation (before upsert)
+        const existingActions = actionRepo.findByEnvironment(envData['oid'] as string)
+        const existingActionMap = new Map(existingActions.map((a) => [a.oid, a]))
+
+        // Upsert environment
+        const envInput = {
+          oid: envData['oid'] as string,
+          local_id: envData['local_id'] as string,
+          version: envData['version'] as string,
+          last_modified_date: envData['last_modified_date'] as string,
+          schema_version: schemaVersion,
+          action_property_specifications: (envData['action_property_specifications'] ??
+            []) as unknown[],
+          value_property_specifications: (envData['value_property_specifications'] ??
+            []) as unknown[],
+          resource_property_specifications: (envData['resource_property_specifications'] ??
+            []) as unknown[],
+          source_filename: sourceFilename,
+          description: (envData['description'] as string | undefined) ?? null,
+        }
+
+        const { created: envCreated } = environmentRepo.upsert(envInput)
+
+        // Upsert each included action
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const includedActions = (envData['included_actions'] ?? []) as Record<string, any>[]
+        const incomingActionOids = new Set<string>()
+
+        for (const action of includedActions) {
+          const actionOid = action['oid'] as string
+          incomingActionOids.add(actionOid)
+
+          const actionInput = {
+            oid: actionOid,
+            environment_oid: envData['oid'] as string,
+            local_id: action['local_id'] as string,
+            version: action['version'] as string,
+            last_modified_date: action['last_modified_date'] as string,
+            action_visibility: (action['action_visibility'] ?? 'opaque') as 'opaque' | 'observable',
+            input_parameter_specifications: (action['input_parameter_specifications'] ??
+              []) as unknown[],
+            output_parameter_specifications: (action['output_parameter_specifications'] ??
+              []) as unknown[],
+            property_specifications: (action['property_specifications'] ?? []) as unknown[],
+            description: (action['description'] as string | undefined) ?? null,
+          }
+          actionRepo.upsert(actionInput)
+        }
+
+        // Delete orphaned actions (in DB but not in incoming package)
+        for (const existingAction of existingActions) {
+          if (!incomingActionOids.has(existingAction.oid)) {
+            codeVersionRepo.deleteByAction(existingAction.oid)
+            actionRepo.delete(existingAction.oid)
+          }
+        }
+
+        // Compute diff
+        const diff: DiffSummary = { added: [], removed: [], modified: [] }
+        for (const action of includedActions) {
+          const actionOid = action['oid'] as string
+          const localId = action['local_id'] as string
+          if (!existingActionMap.has(actionOid)) {
+            diff.added.push(localId)
+          } else {
+            const existing = existingActionMap.get(actionOid)!
+            if (existing.version !== (action['version'] as string)) {
+              diff.modified.push(localId)
+            }
+          }
+        }
+        for (const [oid, existing] of existingActionMap) {
+          if (!incomingActionOids.has(oid)) {
+            diff.removed.push(existing.local_id)
+          }
+        }
+
+        diffs.push(diff)
+        imported.push({
+          type: 'environment',
+          oid: envData['oid'] as string,
+          local_id: envData['local_id'] as string,
+          version: envData['version'] as string,
+          actions_count: includedActions.length,
+          status: envCreated ? 'created' : 'updated',
+        })
+
+        return [...incomingActionOids]
+      }
+
       txHelper.transaction(() => {
         for (const item of parsed) {
           if (item.type === 'wfenvir') {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const envData = item.data as Record<string, any>
-
-            // Get existing actions for diff computation (before upsert)
-            const existingActions = actionRepo.findByEnvironment(envData['oid'] as string)
-            const existingActionMap = new Map(existingActions.map((a) => [a.oid, a]))
-
-            // Upsert environment
-            const envInput = {
-              oid: envData['oid'] as string,
-              local_id: envData['local_id'] as string,
-              version: envData['version'] as string,
-              last_modified_date: envData['last_modified_date'] as string,
-              schema_version: item.schemaVersion as string,
-              action_property_specifications: (envData['action_property_specifications'] ??
-                []) as unknown[],
-              value_property_specifications: (envData['value_property_specifications'] ??
-                []) as unknown[],
-              resource_property_specifications: (envData['resource_property_specifications'] ??
-                []) as unknown[],
-              source_filename: item.file.originalname,
-              description: (envData['description'] as string | undefined) ?? null,
-            }
-
-            const { created: envCreated } = environmentRepo.upsert(envInput)
-
-            // Upsert each included action
+            processEnvSpec(envData, item.schemaVersion as string, item.file.originalname)
+          } else if (item.type === 'wfenvirbundle') {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const includedActions = (envData['included_actions'] ?? []) as Record<string, any>[]
-            const incomingActionOids = new Set<string>()
-
-            for (const action of includedActions) {
-              const actionOid = action['oid'] as string
-              incomingActionOids.add(actionOid)
-
-              const actionInput = {
-                oid: actionOid,
-                environment_oid: envData['oid'] as string,
-                local_id: action['local_id'] as string,
-                version: action['version'] as string,
-                last_modified_date: action['last_modified_date'] as string,
-                action_visibility: (action['action_visibility'] ?? 'opaque') as
-                  | 'opaque'
-                  | 'observable',
-                input_parameter_specifications: (action['input_parameter_specifications'] ??
-                  []) as unknown[],
-                output_parameter_specifications: (action['output_parameter_specifications'] ??
-                  []) as unknown[],
-                property_specifications: (action['property_specifications'] ?? []) as unknown[],
-                description: (action['description'] as string | undefined) ?? null,
-              }
-              actionRepo.upsert(actionInput)
-            }
-
-            // Delete orphaned actions (in DB but not in incoming package)
-            for (const existingAction of existingActions) {
-              if (!incomingActionOids.has(existingAction.oid)) {
-                codeVersionRepo.deleteByAction(existingAction.oid)
-                actionRepo.delete(existingAction.oid)
-              }
-            }
-
-            // Compute diff
-            const diff: DiffSummary = { added: [], removed: [], modified: [] }
-            for (const action of includedActions) {
-              const actionOid = action['oid'] as string
-              const localId = action['local_id'] as string
-              if (!existingActionMap.has(actionOid)) {
-                diff.added.push(localId)
-              } else {
-                const existing = existingActionMap.get(actionOid)!
-                if (existing.version !== (action['version'] as string)) {
-                  diff.modified.push(localId)
+            const lib = item.data as Record<string, any>
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const envSpecs = (lib['environment_specifications'] ?? []) as Record<string, any>[]
+            for (const envData of envSpecs) {
+              const upsertedActionOids = processEnvSpec(
+                envData,
+                item.schemaVersion,
+                item.file.originalname
+              )
+              // Create code versions for any actions that have code in the bundle
+              for (const actionOid of upsertedActionOids) {
+                const codeFiles = item.codeByActionOid[actionOid] ?? []
+                for (const cf of codeFiles) {
+                  codeVersionRepo.saveAndActivate({
+                    action_oid: actionOid,
+                    state: cf.state,
+                    source_code: cf.source,
+                    created_by: 'import',
+                    description: 'imported from .WFenvirBundle',
+                  })
                 }
               }
             }
-            for (const [oid, existing] of existingActionMap) {
-              if (!incomingActionOids.has(oid)) {
-                diff.removed.push(existing.local_id)
-              }
-            }
-
-            diffs.push(diff)
-            imported.push({
-              type: 'environment',
-              oid: envData['oid'] as string,
-              local_id: envData['local_id'] as string,
-              version: envData['version'] as string,
-              actions_count: includedActions.length,
-              status: envCreated ? 'created' : 'updated',
-            })
           } else if (item.type === 'wfaction' || item.type === 'wfactioncodex') {
             // Both bare .WFaction and .WFactionCodeX upsert the action via the same path.
             // eslint-disable-next-line @typescript-eslint/no-explicit-any

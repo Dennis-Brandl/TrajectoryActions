@@ -279,12 +279,10 @@ describe('environment-bundle export', () => {
 
     expect(uploadRes.status).toBe(200)
 
-    // A3 only parses the bundle into a ParsedFile; A4 will add the
-    // transaction-loop branch that creates DB rows. At this point a
-    // re-upload should be a silent no-op — the env should NOT have been
-    // re-created by the upload.
+    // A4: the transaction-loop branch processes the bundle and re-creates the env.
     const afterRes = await request(harness.app).get(`/management/v1/environments/${harness.envOid}`)
-    expect(afterRes.status).toBe(404)
+    expect(afterRes.status).toBe(200)
+    expect(afterRes.body.data.local_id).toBe('KitchenLite')
 
     // Also confirm a known-absent OID is still absent (sanity check).
     const afterEmptyRes = await request(harness.app).get(
@@ -315,6 +313,108 @@ describe('environment-bundle export', () => {
 
     expect(res.status).toBe(400)
     expect(res.body.error.message).toMatch(/schemaVersion/i)
+  })
+
+  it('round-trips: export → delete → re-upload restores env + actions + code', async () => {
+    // Export bundle
+    const exportRes = await request(harness.app)
+      .get(`/management/v1/environments/${harness.envOid}/export-bundle`)
+      .responseType('blob')
+    expect(exportRes.status).toBe(200)
+
+    // Capture original code text for byte-equal comparison after round-trip
+    const beforeZip = await JSZip.loadAsync(exportRes.body)
+    const beforeStartingEntry = beforeZip.file(`code/${harness.actionOids[0]}/STARTING.py`)
+    expect(beforeStartingEntry).not.toBeNull()
+    const beforeStarting = await beforeStartingEntry!.async('text')
+
+    // Delete the env
+    await request(harness.app).delete(`/management/v1/environments/${harness.envOid}`).expect(200)
+
+    // Re-upload
+    const uploadRes = await request(harness.app)
+      .post('/management/v1/upload')
+      .attach('files', exportRes.body, 'KitchenLite.WFenvirBundle')
+    expect(uploadRes.status).toBe(200)
+
+    // Verify env exists and has the same shape
+    const envRes = await request(harness.app)
+      .get(`/management/v1/environments/${harness.envOid}`)
+      .expect(200)
+    expect(envRes.body.data.local_id).toBe('KitchenLite')
+    // The env detail's actions array length should be 2 (Boil + Chop).
+    expect(envRes.body.data.actions).toHaveLength(2)
+
+    // Verify code byte-equality for one state on one action (via active version)
+    const codeRes = await request(harness.app)
+      .get(`/management/v1/code/${harness.actionOids[0]}/STARTING/active`)
+      .expect(200)
+    expect(codeRes.body.data.source_code).toBe(beforeStarting)
+  })
+
+  it('round-trips an env with no code (no spurious code rows)', async () => {
+    // Seed a fresh env with one action and NO code attached
+    const noCodeEnv = {
+      local_id: 'NoCode',
+      oid: '55555555-5555-5555-5555-555555555555',
+      version: '1',
+      last_modified_date: '2026-05-19T00:00:00.000Z',
+      schemaVersion: '4.0',
+      environment_specifications: [
+        {
+          oid: '66666666-6666-6666-6666-666666666666',
+          local_id: 'NoCode',
+          version: '1',
+          last_modified_date: '2026-05-19T00:00:00.000Z',
+          description: null,
+          action_property_specifications: [],
+          value_property_specifications: [],
+          resource_property_specifications: [],
+          included_actions: [
+            {
+              oid: '77777777-7777-7777-7777-777777777777',
+              local_id: 'Silent',
+              version: '1',
+              last_modified_date: '2026-05-19T00:00:00.000Z',
+              description: null,
+              action_visibility: 'opaque',
+              input_parameter_specifications: [],
+              output_parameter_specifications: [],
+              property_specifications: [],
+              timeout_seconds: null,
+            },
+          ],
+        },
+      ],
+    }
+    await request(harness.app)
+      .post('/management/v1/upload')
+      .attach('files', Buffer.from(JSON.stringify(noCodeEnv)), 'NoCode.WFenvir')
+      .expect(200)
+
+    const exportRes = await request(harness.app)
+      .get('/management/v1/environments/66666666-6666-6666-6666-666666666666/export-bundle')
+      .responseType('blob')
+    expect(exportRes.status).toBe(200)
+
+    await request(harness.app)
+      .delete('/management/v1/environments/66666666-6666-6666-6666-666666666666')
+      .expect(200)
+
+    const uploadRes = await request(harness.app)
+      .post('/management/v1/upload')
+      .attach('files', exportRes.body, 'NoCode.WFenvirBundle')
+    expect(uploadRes.status).toBe(200)
+
+    // Env exists, action exists, no code versions
+    const envRes = await request(harness.app)
+      .get('/management/v1/environments/66666666-6666-6666-6666-666666666666')
+      .expect(200)
+    const actions = envRes.body.data.actions
+    expect(actions).toHaveLength(1)
+    // The action's states_with_code should be empty (no code rows were created).
+    const action = actions[0]
+    expect(action.states_with_code).toEqual([])
   })
 
   it('emits a valid bundle for an empty env (zero actions)', async () => {
