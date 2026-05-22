@@ -165,7 +165,7 @@ export class ActionRepository {
       },
       state: () => {
         fields.push('state = ?')
-        values.push(input.state ?? 'Draft')
+        values.push(input.state)
       },
     }
 

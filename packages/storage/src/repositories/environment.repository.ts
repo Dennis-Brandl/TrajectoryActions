@@ -1,6 +1,5 @@
 import type BetterSqlite3 from 'better-sqlite3'
-import type { Environment, EnvironmentInput, EnvironmentRow } from '../types.js'
-import type { LifecycleState } from '../types.js'
+import type { Environment, EnvironmentInput, EnvironmentRow, LifecycleState } from '../types.js'
 
 export class EnvironmentRepository {
   private readonly db: BetterSqlite3.Database
@@ -152,7 +151,7 @@ export class EnvironmentRepository {
       },
       state: () => {
         fields.push('state = ?')
-        values.push(input.state ?? 'Draft')
+        values.push(input.state)
       },
     }
 
