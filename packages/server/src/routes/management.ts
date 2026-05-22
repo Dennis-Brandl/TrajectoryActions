@@ -750,6 +750,9 @@ export function createManagementRouter(
             []) as unknown[],
           source_filename: sourceFilename,
           description: (envData['description'] as string | undefined) ?? null,
+          state:
+            (envData['state'] as import('@trajectory/storage').LifecycleState | undefined) ??
+            'Draft',
         }
 
         const { created: envCreated } = environmentRepo.upsert(envInput)
@@ -776,6 +779,9 @@ export function createManagementRouter(
               []) as unknown[],
             property_specifications: (action['property_specifications'] ?? []) as unknown[],
             description: (action['description'] as string | undefined) ?? null,
+            state:
+              (action['state'] as import('@trajectory/storage').LifecycleState | undefined) ??
+              'Draft',
           }
           actionRepo.upsert(actionInput)
         }
@@ -877,6 +883,9 @@ export function createManagementRouter(
                 []) as unknown[],
               property_specifications: (actionData['property_specifications'] ?? []) as unknown[],
               description: (actionData['description'] as string | undefined) ?? null,
+              state:
+                (actionData['state'] as import('@trajectory/storage').LifecycleState | undefined) ??
+                'Draft',
             }
             const { created: actionCreated } = actionRepo.upsert(actionInput)
             imported.push({

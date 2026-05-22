@@ -21,11 +21,13 @@ export class ActionRepository {
       INSERT INTO actions (
         oid, environment_oid, local_id, version, last_modified_date, description,
         action_visibility, input_parameter_specifications,
-        output_parameter_specifications, property_specifications, timeout_seconds
+        output_parameter_specifications, property_specifications, timeout_seconds,
+        state
       ) VALUES (
         @oid, @environment_oid, @local_id, @version, @last_modified_date, @description,
         @action_visibility, @input_parameter_specifications,
-        @output_parameter_specifications, @property_specifications, @timeout_seconds
+        @output_parameter_specifications, @property_specifications, @timeout_seconds,
+        @state
       )
     `)
 
@@ -71,6 +73,7 @@ export class ActionRepository {
       output_parameter_specifications: JSON.stringify(input.output_parameter_specifications),
       property_specifications: JSON.stringify(input.property_specifications),
       timeout_seconds: input.timeout_seconds ?? null,
+      state: input.state ?? 'Draft',
     }
   }
 
@@ -87,6 +90,7 @@ export class ActionRepository {
       output_parameter_specifications: JSON.parse(row.output_parameter_specifications) as unknown[],
       property_specifications: JSON.parse(row.property_specifications) as unknown[],
       timeout_seconds: row.timeout_seconds,
+      state: row.state as Action['state'],
     }
   }
 
@@ -158,6 +162,10 @@ export class ActionRepository {
       timeout_seconds: () => {
         fields.push('timeout_seconds = ?')
         values.push(input.timeout_seconds ?? null)
+      },
+      state: () => {
+        fields.push('state = ?')
+        values.push(input.state ?? 'Draft')
       },
     }
 

@@ -4,6 +4,7 @@ import { openDatabase } from '../database.js'
 import { runMigrations } from '../migrations/runner.js'
 import { migration as initialMigration } from '../migrations/001-initial-schema.js'
 import { migration as actionTimeoutMigration } from '../migrations/002-action-timeout.js'
+import { migration as lifecycleStateMigration } from '../migrations/003-lifecycle-state.js'
 import { EnvironmentRepository } from '../repositories/environment.repository.js'
 import { ActionRepository } from '../repositories/action.repository.js'
 import type { ActionInput, EnvironmentInput } from '../types.js'
@@ -44,7 +45,7 @@ describe('ActionRepository', () => {
 
   beforeEach(() => {
     db = openDatabase(':memory:')
-    runMigrations(db, [initialMigration, actionTimeoutMigration])
+    runMigrations(db, [initialMigration, actionTimeoutMigration, lifecycleStateMigration])
     envRepo = new EnvironmentRepository(db)
     repo = new ActionRepository(db)
 
@@ -101,6 +102,26 @@ describe('ActionRepository', () => {
         makeActionInput({ oid: 'act-obs', action_visibility: 'observable' })
       )
       expect(action.action_visibility).toBe('observable')
+    })
+  })
+
+  describe('lifecycle state', () => {
+    it('persists and returns the lifecycle state', () => {
+      repo.create(makeActionInput({ oid: 'act-state-1', state: 'Approved' }))
+      const row = repo.findByOid('act-state-1')!
+      expect(row.state).toBe('Approved')
+    })
+
+    it('defaults state to Draft when not provided', () => {
+      repo.create(makeActionInput({ oid: 'act-state-2' }))
+      const row = repo.findByOid('act-state-2')!
+      expect(row.state).toBe('Draft')
+    })
+
+    it('updates lifecycle state via update()', () => {
+      repo.create(makeActionInput({ oid: 'act-state-3', state: 'InTest' }))
+      const updated = repo.update('act-state-3', { state: 'InReview' })
+      expect(updated!.state).toBe('InReview')
     })
   })
 
