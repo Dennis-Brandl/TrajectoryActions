@@ -840,6 +840,224 @@ export function createManagementRouter(
           continue
         }
 
+        // ext === 'wfenvirlibx' — renamed .WFenvirX env-library ZIP.
+        // Contains an inner *.WFenvir JSON file in env-library shape.
+        // Treated exactly like the legacy .WFenvirX no-manifest / 'environment-library' path.
+        if (ext === 'wfenvirlibx') {
+          let zip: JSZip
+          try {
+            zip = await JSZip.loadAsync(file.buffer)
+          } catch {
+            return void res.status(400).json({
+              error: {
+                code: 'VALIDATION_ERROR',
+                message: `Failed to read ZIP archive in "${file.originalname}"`,
+                details: { filename: file.originalname },
+              },
+            })
+          }
+
+          // First inner *.WFenvir or *.WFenvirX entry wins (mirrors legacy .WFenvirX behavior).
+          const innerEntry = Object.values(zip.files).find((entry) => {
+            if (entry.dir) return false
+            const innerExt = entry.name.split('.').pop()?.toLowerCase() ?? ''
+            return innerExt === 'wfenvir' || innerExt === 'wfenvirx'
+          })
+          if (!innerEntry) {
+            return void res.status(400).json({
+              error: {
+                code: 'VALIDATION_ERROR',
+                message: `ZIP "${file.originalname}" contains no .WFenvir entry`,
+                details: { filename: file.originalname },
+              },
+            })
+          }
+          const libJsonFromZip = await innerEntry.async('text')
+
+          let libDataFromZip: unknown
+          try {
+            libDataFromZip = JSON.parse(libJsonFromZip)
+          } catch {
+            return void res.status(400).json({
+              error: {
+                code: 'VALIDATION_ERROR',
+                message: `Failed to parse JSON in file "${file.originalname}"`,
+                details: { filename: file.originalname },
+              },
+            })
+          }
+          if (typeof libDataFromZip !== 'object' || libDataFromZip === null) {
+            return void res.status(400).json({
+              error: {
+                code: 'VALIDATION_ERROR',
+                message: `File "${file.originalname}" must contain a JSON object`,
+                details: { filename: file.originalname },
+              },
+            })
+          }
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const libFromZip = libDataFromZip as Record<string, any>
+
+          const libZipRequired = [
+            'local_id',
+            'oid',
+            'version',
+            'last_modified_date',
+            'environment_specifications',
+          ]
+          for (const field of libZipRequired) {
+            if (libFromZip[field] === undefined) {
+              return void res.status(400).json({
+                error: {
+                  code: 'VALIDATION_ERROR',
+                  message: `Missing required field "${field}" in environment library "${file.originalname}"`,
+                  details: { filename: file.originalname },
+                },
+              })
+            }
+          }
+
+          // schemaVersion validation (mirrors the .WFenvirX legacy-library branch)
+          const rawSchemaVersionFromZip = libFromZip['schemaVersion'] as unknown
+          let schemaVersionFromZip: string
+          if (rawSchemaVersionFromZip === undefined) {
+            schemaVersionFromZip = '4.0'
+          } else if (typeof rawSchemaVersionFromZip !== 'string') {
+            return void res.status(400).json({
+              error: {
+                code: 'VALIDATION_ERROR',
+                message: `schemaVersion must be a string in "${file.originalname}"`,
+                details: {
+                  filename: file.originalname,
+                  schemaVersion: rawSchemaVersionFromZip,
+                },
+              },
+            })
+          } else {
+            const ver = parseFloat(rawSchemaVersionFromZip)
+            if (Number.isNaN(ver) || ver < 3.0) {
+              return void res.status(400).json({
+                error: {
+                  code: 'VALIDATION_ERROR',
+                  message: `Unsupported schemaVersion "${rawSchemaVersionFromZip}" in "${file.originalname}". Minimum accepted version is "3.0".`,
+                  details: {
+                    filename: file.originalname,
+                    schemaVersion: rawSchemaVersionFromZip,
+                  },
+                },
+              })
+            }
+            schemaVersionFromZip = rawSchemaVersionFromZip
+          }
+
+          if (!Array.isArray(libFromZip['environment_specifications'])) {
+            return void res.status(400).json({
+              error: {
+                code: 'VALIDATION_ERROR',
+                message: `"environment_specifications" must be an array in "${file.originalname}"`,
+                details: { filename: file.originalname },
+              },
+            })
+          }
+
+          const envSpecsFromZip = libFromZip['environment_specifications'] as unknown[]
+          for (let idx = 0; idx < envSpecsFromZip.length; idx++) {
+            const envSpec = envSpecsFromZip[idx]
+            if (typeof envSpec !== 'object' || envSpec === null) {
+              return void res.status(400).json({
+                error: {
+                  code: 'VALIDATION_ERROR',
+                  message: `Each environment_specifications entry must be an object in "${file.originalname}"`,
+                  details: { filename: file.originalname, index: idx },
+                },
+              })
+            }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const env = envSpec as Record<string, any>
+
+            for (const field of ['oid', 'local_id', 'version', 'last_modified_date']) {
+              if (env[field] === undefined) {
+                return void res.status(400).json({
+                  error: {
+                    code: 'VALIDATION_ERROR',
+                    message: `Missing required field "${field}" in environment_specifications[${idx}] of "${file.originalname}"`,
+                    details: { filename: file.originalname, index: idx },
+                  },
+                })
+              }
+            }
+            if (!Array.isArray(env['included_actions'])) {
+              return void res.status(400).json({
+                error: {
+                  code: 'VALIDATION_ERROR',
+                  message: `"included_actions" must be an array in environment_specifications[${idx}] of "${file.originalname}"`,
+                  details: { filename: file.originalname, index: idx },
+                },
+              })
+            }
+            for (const action of env['included_actions'] as unknown[]) {
+              if (typeof action !== 'object' || action === null) {
+                return void res.status(400).json({
+                  error: {
+                    code: 'VALIDATION_ERROR',
+                    message: `Each included_action must be an object in environment_specifications[${idx}] of "${file.originalname}"`,
+                    details: { filename: file.originalname, index: idx },
+                  },
+                })
+              }
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const act = action as Record<string, any>
+              for (const field of ['oid', 'local_id', 'version', 'last_modified_date']) {
+                if (act[field] === undefined) {
+                  return void res.status(400).json({
+                    error: {
+                      code: 'VALIDATION_ERROR',
+                      message: `Missing required action field "${field}" in environment_specifications[${idx}] of "${file.originalname}"`,
+                      details: { filename: file.originalname, index: idx },
+                    },
+                  })
+                }
+              }
+            }
+
+            parsed.push({
+              file,
+              type: 'wfenvir',
+              data: env,
+              schemaVersion: schemaVersionFromZip,
+            })
+          }
+          continue
+        }
+
+        // ext === 'wfactionlibx' — renamed action-library format.
+        // No parser exists for this format in this container (the legacy .WFactionX / action-library
+        // was never supported as a container upload). Reject with a clear error directing the user
+        // to upload individual .WFaction files instead.
+        if (ext === 'wfactionlibx') {
+          return void res.status(400).json({
+            error: {
+              code: 'VALIDATION_ERROR',
+              message: `".WFactionLibX" (action library) is not supported as a container upload. Upload individual .WFaction files instead.`,
+              details: { filename: file.originalname },
+            },
+          })
+        }
+
+        // ext === 'wfsteplibx' — renamed step-library format.
+        // No parser exists for this format in this container (the legacy .WFslibX / step-library
+        // was never supported as a container upload). Reject with a clear error.
+        if (ext === 'wfsteplibx') {
+          return void res.status(400).json({
+            error: {
+              code: 'VALIDATION_ERROR',
+              message: `".WFstepLibX" (step library) is not supported as a container upload.`,
+              details: { filename: file.originalname },
+            },
+          })
+        }
+
         // ext === 'wfenvir' (bare library JSON)
         const libraryJson: string = file.buffer.toString('utf-8')
 
@@ -1210,6 +1428,7 @@ export function createManagementRouter(
             // Delete orphaned actions (in DB but not in incoming package)
             for (const existingAction of existingActions) {
               if (!incomingActionOids.has(existingAction.oid)) {
+                instanceRepo.deleteByAction(existingAction.oid)
                 codeVersionRepo.deleteByAction(existingAction.oid)
                 actionRepo.delete(existingAction.oid)
               }

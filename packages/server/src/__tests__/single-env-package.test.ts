@@ -277,10 +277,11 @@ describe('single-env-package upload (Task 3.8)', () => {
   })
 
   // -----------------------------------------------------------------------
-  // Test 2: New extension .WFenvirLibX is accepted (not rejected at validation)
+  // Test 2: New extension .WFenvirLibX is a real ZIP containing a *.WFenvir
+  // inner file (env-library shape). Must parse and import the env correctly.
   // -----------------------------------------------------------------------
-  it('accepts upload of .WFenvirLibX extension (new renamed library extension)', async () => {
-    // A bare .WFenvir JSON (env-library format) with .WFenvirLibX extension
+  it('accepts upload of .WFenvirLibX extension (renamed env-library ZIP)', async () => {
+    // Build a real ZIP containing an inner LibraryX.WFenvir with env-library JSON
     const libraryPayload = {
       local_id: 'LibraryX',
       oid: 'lib-env-x-0001',
@@ -313,12 +314,15 @@ describe('single-env-package upload (Task 3.8)', () => {
       ],
     }
 
+    const zip = new JSZip()
+    zip.file('LibraryX.WFenvir', JSON.stringify(libraryPayload))
+    const zipBytes = await zip.generateAsync({ type: 'nodebuffer' })
+
     const res = await request(harness.app)
       .post('/management/v1/upload')
-      .attach('files', Buffer.from(JSON.stringify(libraryPayload)), 'LibraryX.WFenvirLibX')
+      .attach('files', zipBytes, 'LibraryX.WFenvirLibX')
 
-    // .WFenvirLibX passes the extension check (not rejected with 400 VALIDATION_ERROR)
-    // The payload is a bare JSON library, so it will be processed as a wfenvir entry
+    // .WFenvirLibX is now a real ZIP → routed to the legacy env-library ZIP path
     expect(res.status).toBe(200)
     expect(res.body.data.imported).toEqual(
       expect.arrayContaining([
@@ -328,6 +332,12 @@ describe('single-env-package upload (Task 3.8)', () => {
         }),
       ])
     )
+
+    // Env and action exist in DB
+    const env = harness.environmentRepo.findByOid('lib-env-x-spec-0001')
+    expect(env).not.toBeNull()
+    expect(env?.local_id).toBe('LibEnvX')
+    expect(harness.actionRepo.findByOid('lib-act-x-0001')).not.toBeNull()
   })
 
   // -----------------------------------------------------------------------
@@ -375,12 +385,10 @@ describe('single-env-package upload (Task 3.8)', () => {
     zip.file(`code/${actionOid}/STARTING.py`, "outputs['status'] = '0'  # bundle code")
     const buf = await zip.generateAsync({ type: 'nodebuffer' })
 
-    const res = await request(harness.app)
-      .post('/management/v1/upload')
-      .attach('files', buf, {
-        filename: 'BundleEnv.WFenvirBundleX',
-        contentType: 'application/zip',
-      })
+    const res = await request(harness.app).post('/management/v1/upload').attach('files', buf, {
+      filename: 'BundleEnv.WFenvirBundleX',
+      contentType: 'application/zip',
+    })
 
     expect(res.status).toBe(200)
     expect(res.body.data.imported).toEqual(
