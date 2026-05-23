@@ -483,7 +483,7 @@ describe('environment-bundle export', () => {
     expect(res.body.error.code).toBe('NOT_FOUND')
   })
 
-  it('GET /export-envir-x emits a valid .WFenvirX ZIP (env + actions, no code, no manifest)', async () => {
+  it('GET /export-envir-x emits a valid .WFenvirX ZIP (single-env shape: manifest + root .WFenvir + actions/*.WFaction, no code)', async () => {
     const res = await request(harness.app)
       .get(`/management/v1/environments/${harness.envOid}/export-envir-x`)
       .responseType('blob')
@@ -493,37 +493,33 @@ describe('environment-bundle export', () => {
     expect(res.headers['content-disposition']).toBe('attachment; filename="KitchenLite.WFenvirX"')
 
     const zip = await JSZip.loadAsync(res.body as Buffer)
-
-    // The ZIP must contain exactly one entry: KitchenLite.WFenvir
     const entries = Object.keys(zip.files).filter((n) => !zip.files[n].dir)
-    expect(entries).toHaveLength(1)
-    expect(entries[0]).toBe('KitchenLite.WFenvir')
 
-    // No manifest.json
-    expect(zip.file('manifest.json')).toBeNull()
+    // Must have manifest.json, root .WFenvir, and one .WFaction per action (2 actions)
+    expect(zip.file('manifest.json')).not.toBeNull()
+    expect(zip.file('KitchenLite.WFenvir')).not.toBeNull()
+    // 2 actions → 2 actions/*.WFaction entries + 1 root .WFenvir + 1 manifest.json = 4 entries
+    expect(entries).toHaveLength(4)
 
-    // No code/ directory entries
-    const codeEntries = Object.keys(zip.files).filter((n) => n.startsWith('code/'))
+    // manifest.json must identify as single-env package
+    const manifest = JSON.parse(await zip.file('manifest.json')!.async('text'))
+    expect(manifest.packageType).toBe('environment-package')
+    expect(manifest.formatVersion).toBe(1)
+    expect(manifest.environmentName).toBe('KitchenLite')
+    expect(manifest.actionCount).toBe(2)
+
+    // Root .WFenvir must be single-env shape (NOT library-wrapped)
+    const envJson = JSON.parse(await zip.file('KitchenLite.WFenvir')!.async('text'))
+    expect(envJson.oid).toBe(harness.envOid)
+    expect(envJson.local_id).toBe('KitchenLite')
+    // Must NOT have environment_specifications (that is the legacy library shape)
+    expect(envJson.environment_specifications).toBeUndefined()
+
+    // actions/*.WFaction entries for each action — no code (.py) files
+    const actionEntries = entries.filter((n) => n.startsWith('actions/') && n.endsWith('.WFaction'))
+    expect(actionEntries).toHaveLength(2)
+    const codeEntries = entries.filter((n) => n.endsWith('.py'))
     expect(codeEntries).toHaveLength(0)
-
-    // No .py files
-    const pyEntries = Object.keys(zip.files).filter((n) => n.endsWith('.py'))
-    expect(pyEntries).toHaveLength(0)
-
-    // Inner .WFenvir is valid JSON with correct structure
-    const innerEntry = zip.file('KitchenLite.WFenvir')
-    expect(innerEntry).not.toBeNull()
-    const innerJson = JSON.parse(await innerEntry!.async('text'))
-    expect(innerJson.environment_specifications).toHaveLength(1)
-    const actions = innerJson.environment_specifications[0].included_actions
-    expect(actions).toHaveLength(2)
-
-    // Trajectory Editor schema compatibility (master-environment-library.json
-    // requires action_name + action_library on each included_action).
-    for (const a of actions) {
-      expect(a.action_name).toBe(a.local_id)
-      expect(a.action_library).toBe('KitchenLite')
-    }
   })
 
   it('GET /export-envir-x can round-trip through the existing upload handler', async () => {

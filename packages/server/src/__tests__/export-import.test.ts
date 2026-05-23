@@ -488,3 +488,121 @@ describe('Snapshot Import — POST /management/v1/snapshot/import', () => {
     }
   }, 30_000)
 })
+
+// ============================================================
+// Export-envir-x: new single-env .WFenvirX shape
+// ============================================================
+
+describe('export-envir-x — GET /management/v1/environments/:oid/export-envir-x', () => {
+  it('returns a zip with manifest.json, root *.WFenvir, and actions/*.WFaction', async () => {
+    const t = createTestApp()
+    try {
+      seedActionWithCode(t)
+
+      const res = await request(t.app)
+        .get('/management/v1/environments/env-test-001/export-envir-x')
+        .responseType('arraybuffer')
+        .expect(200)
+
+      expect(res.headers['content-type']).toContain('application/zip')
+      expect(res.headers['content-disposition']).toContain('TestEnv.WFenvirX')
+
+      const zip = await JSZip.loadAsync(res.body)
+      const fileNames = Object.keys(zip.files).sort()
+
+      // Must have exactly three entry types: root .WFenvir, actions/*.WFaction, manifest.json
+      expect(fileNames).toContain('manifest.json')
+      expect(fileNames).toContain('TestEnv.WFenvir')
+      expect(fileNames).toContain('actions/TestAction.WFaction')
+
+      // manifest.json must identify as environment-package
+      const manifest = JSON.parse(await zip.file('manifest.json')!.async('string'))
+      expect(manifest.packageType).toBe('environment-package')
+      expect(manifest.formatVersion).toBe(1)
+      expect(manifest.environmentName).toBe('TestEnv')
+      expect(manifest.actionCount).toBe(1)
+
+      // Root .WFenvir must be a single-env object (NOT library-wrapped)
+      const envJson = JSON.parse(await zip.file('TestEnv.WFenvir')!.async('string'))
+      expect(envJson.oid).toBe('env-test-001')
+      expect(envJson.local_id).toBe('TestEnv')
+      // Must NOT have environment_specifications (that is the library shape)
+      expect(envJson.environment_specifications).toBeUndefined()
+
+      // actions/*.WFaction must contain standalone action object
+      const actionJson = JSON.parse(await zip.file('actions/TestAction.WFaction')!.async('string'))
+      expect(actionJson.oid).toBe('act-test-001')
+      expect(actionJson.local_id).toBe('TestAction')
+      expect(actionJson.action_visibility).toBe('observable')
+    } finally {
+      await t.manager.shutdown()
+    }
+  }, 30_000)
+
+  it('returns 404 for unknown environment', async () => {
+    const t = createTestApp()
+    try {
+      const res = await request(t.app)
+        .get('/management/v1/environments/env-nonexistent/export-envir-x')
+        .expect(404)
+
+      expect(res.body.error.code).toBe('NOT_FOUND')
+    } finally {
+      await t.manager.shutdown()
+    }
+  }, 30_000)
+
+  it('export-envir-x round-trip: export → re-upload as wfenvirx-single-env → env+actions restored', async () => {
+    const t = createTestApp()
+    try {
+      seedActionWithCode(t)
+
+      // 1. Export the env as new single-env .WFenvirX
+      const exportRes = await request(t.app)
+        .get('/management/v1/environments/env-test-001/export-envir-x')
+        .responseType('arraybuffer')
+        .expect(200)
+
+      const zipBuf = exportRes.body as Buffer
+
+      // 2. Mutate the env in-place (change description) so we can detect the re-import
+      t.environmentRepo.upsert({
+        oid: 'env-test-001',
+        local_id: 'TestEnv',
+        version: '1.0.0',
+        last_modified_date: '2026-01-01T00:00:00Z',
+        schema_version: '4.0',
+        description: 'CHANGED',
+        action_property_specifications: [],
+        value_property_specifications: [],
+        resource_property_specifications: [],
+        source_filename: 'test.WFenvir',
+      })
+
+      // 3. Re-upload the exported ZIP via POST /management/v1/upload
+      const uploadRes = await request(t.app)
+        .post('/management/v1/upload')
+        .attach('files', zipBuf, 'TestEnv.WFenvirX')
+        .expect(200)
+
+      expect(uploadRes.body.data.imported).toHaveLength(1)
+      expect(uploadRes.body.data.imported[0].oid).toBe('env-test-001')
+      expect(uploadRes.body.data.imported[0].local_id).toBe('TestEnv')
+
+      // 4. Assert the round-tripped env matches the original (description restored to null)
+      const envAfter = t.environmentRepo.findByOid('env-test-001')
+      expect(envAfter).not.toBeNull()
+      expect(envAfter!.local_id).toBe('TestEnv')
+      expect(envAfter!.description).toBeNull()
+
+      // 5. Assert action was round-tripped correctly
+      const actionsAfter = t.actionRepo.findByEnvironment('env-test-001')
+      expect(actionsAfter).toHaveLength(1)
+      expect(actionsAfter[0].oid).toBe('act-test-001')
+      expect(actionsAfter[0].local_id).toBe('TestAction')
+      expect(actionsAfter[0].action_visibility).toBe('observable')
+    } finally {
+      await t.manager.shutdown()
+    }
+  }, 30_000)
+})

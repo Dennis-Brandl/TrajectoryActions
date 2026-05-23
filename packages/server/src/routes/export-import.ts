@@ -408,14 +408,64 @@ export function createExportImportRouter(
     buffer: Buffer
     filename: string
   } | null> {
-    const lib = buildEnvLibraryJson(envOid)
-    if (!lib) return null
+    const env = environmentRepo.findByOid(envOid)
+    if (!env) return null
+
+    const actions = actionRepo.findByEnvironment(env.oid)
 
     const zip = new JSZip()
-    zip.file(lib.filename, JSON.stringify(lib.json, null, 2))
+
+    // Root *.WFenvir — single-env shape (NOT library-wrapped)
+    const envJson = {
+      oid: env.oid,
+      local_id: env.local_id,
+      version: env.version,
+      last_modified_date: env.last_modified_date,
+      schemaVersion: env.schema_version ?? '4.0',
+      description: env.description ?? null,
+      state: env.state ?? 'Draft',
+      action_property_specifications: env.action_property_specifications,
+      value_property_specifications: env.value_property_specifications,
+      resource_property_specifications: env.resource_property_specifications,
+    }
+    zip.file(`${env.local_id}.WFenvir`, JSON.stringify(envJson, null, 2))
+
+    // actions/*.WFaction — one file per action (standalone shape, no code)
+    for (const action of actions) {
+      const actionJson = {
+        oid: action.oid,
+        local_id: action.local_id,
+        version: action.version,
+        last_modified_date: action.last_modified_date,
+        description: action.description ?? null,
+        action_visibility: action.action_visibility,
+        state: action.state ?? 'Draft',
+        input_parameter_specifications: action.input_parameter_specifications,
+        output_parameter_specifications: action.output_parameter_specifications,
+        property_specifications: action.property_specifications,
+        timeout_seconds: action.timeout_seconds ?? null,
+      }
+      zip.file(`actions/${action.local_id}.WFaction`, JSON.stringify(actionJson, null, 2))
+    }
+
+    // manifest.json — identifies this as a single-env package
+    zip.file(
+      'manifest.json',
+      JSON.stringify(
+        {
+          packageType: 'environment-package',
+          formatVersion: 1,
+          createdAt: new Date().toISOString(),
+          environmentName: env.local_id,
+          actionCount: actions.length,
+        },
+        null,
+        2
+      )
+    )
 
     const buffer = await zip.generateAsync({ type: 'nodebuffer' })
-    return { buffer, filename: `${lib.env!.local_id}.WFenvirX` }
+    return { buffer, filename: `${env.local_id}.WFenvirX` }
   }
 
   router.get('/environments/:oid/export-envir-x', (req, res, next) => {
