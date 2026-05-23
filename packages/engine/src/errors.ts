@@ -39,6 +39,13 @@ export class InvalidStateTransitionError extends EngineError {
  * EngineError code: 'PROPERTY_WRITE_ERROR'. Maps to HTTP 500 in the error handler.
  * Raised by PythonWorkerPool when SidecarResponse.error_type === 'PROPERTY_WRITE_ERROR'.
  */
+export class PropertyWriteError extends EngineError {
+  constructor(message: string) {
+    super('PROPERTY_WRITE_ERROR', message)
+    this.name = 'PropertyWriteError'
+    Object.setPrototypeOf(this, new.target.prototype)
+  }
+}
 
 /**
  * Thrown when Python code execution fails (runtime error, timeout, worker crash, etc.).

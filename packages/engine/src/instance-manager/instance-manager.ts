@@ -261,9 +261,9 @@ export class InstanceManager {
     if (this.sseManager) {
       for (const specName of touchedSpecNames) {
         const spec = specs.find((s) => s.name === specName)!
-        const changedEntries = mutations
-          .filter((m) => m.spec_name === specName)
-          .map((m) => m.entry_name)
+        const changedEntries = [
+          ...new Set(mutations.filter((m) => m.spec_name === specName).map((m) => m.entry_name)),
+        ]
         this.sseManager.publishProperty(environment_oid, specName, {
           entries: spec.entries,
           changed_entries: changedEntries,

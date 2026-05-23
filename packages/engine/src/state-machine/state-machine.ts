@@ -344,6 +344,16 @@ export class StateMachine {
 
     // Handle deferred command (HOLD/STOP/ABORT that arrived during code execution)
     if (this.deferredCommands.has(instanceId)) {
+      // Apply property mutations before the deferred command — writes that completed
+      // before the stop are not lost.
+      if (this.callbacks?.onPropertyMutations && result.property_mutations?.length) {
+        this.callbacks.onPropertyMutations(
+          instanceId,
+          instance.environment_oid,
+          instance.action_oid,
+          result.property_mutations
+        )
+      }
       const deferredCommand = this.deferredCommands.get(instanceId)!
       this.deferredCommands.delete(instanceId)
       await this.sendCommand(instanceId, deferredCommand)
