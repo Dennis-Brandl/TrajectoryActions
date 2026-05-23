@@ -7,8 +7,16 @@ import type {
   SettingsRepository,
   Instance,
 } from '@trajectory/storage'
-import type { SseManager } from '../sse-manager.js'
+import type { SseManager, SseEvent } from '../sse-manager.js'
 import { validateBody } from '../validation.js'
+
+// ============================================================
+// SSE event formatter (mirrors commands.ts)
+// ============================================================
+
+function formatSseEvent(event: SseEvent): string {
+  return `event: ${event.type}\nid: ${event.id}\ndata: ${JSON.stringify(event.data)}\n\n`
+}
 
 // ============================================================
 // Response shape helper
@@ -107,12 +115,11 @@ export function createProtocolRouter(
   actionRepo: ActionRepository,
   instanceRepo: InstanceRepository,
   _settingsRepo: SettingsRepository,
-  _sseManager: SseManager,
+  sseManager: SseManager,
   environmentRepo: EnvironmentRepository
 ): Router {
-  // _settingsRepo and _sseManager reserved for plan 05-02 (SSE streaming, expose_traceback)
+  // _settingsRepo reserved for plan 05-02 (expose_traceback)
   void _settingsRepo
-  void _sseManager
 
   const router = Router()
 
@@ -346,6 +353,75 @@ export function createProtocolRouter(
       },
       meta: {},
     })
+  })
+
+  // --------------------------------------------------------
+  // REST-12: GET /properties/:id/events (SSE)
+  // --------------------------------------------------------
+  router.get('/properties/:id/events', (req, res) => {
+    const propertyName = req.params.id
+    const envOidFilter = (req.query.environment_oid as string | undefined) ?? undefined
+
+    // Resolve target env
+    const envs = environmentRepo.findAll()
+    const matches: Array<(typeof envs)[number]> = []
+    for (const env of envs) {
+      if (envOidFilter && env.oid !== envOidFilter) continue
+      const spec = (env.action_property_specifications as Array<Record<string, unknown>>).find(
+        (p) => p.name === propertyName
+      )
+      if (spec) matches.push(env)
+    }
+    if (matches.length === 0) {
+      res.status(404).json({
+        error: {
+          code: 'PROPERTY_NOT_FOUND',
+          message: `Property '${propertyName}' not found`,
+          details: {},
+        },
+      })
+      return
+    }
+    if (matches.length > 1) {
+      res.status(409).json({
+        error: {
+          code: 'AMBIGUOUS_PROPERTY',
+          message: `Property '${propertyName}' found in ${matches.length} environments`,
+          details: { environment_oids: matches.map((e) => e.oid) },
+        },
+      })
+      return
+    }
+    const env = matches[0]
+
+    // Set SSE headers and flush immediately
+    res.set({
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+    res.flushHeaders()
+
+    // Replay buffered events if Last-Event-ID present
+    const lastEventIdHeader = req.headers['last-event-id']
+    const lastEventId = lastEventIdHeader ? Number(lastEventIdHeader) : -1
+    if (!Number.isNaN(lastEventId) && lastEventId >= 0) {
+      for (const ev of sseManager.getPropertyEventsSince(env.oid, propertyName, lastEventId)) {
+        if (!res.writableEnded) {
+          res.write(formatSseEvent(ev))
+        }
+      }
+    }
+
+    // Subscribe live
+    const unsub = sseManager.subscribeProperty(env.oid, propertyName, (ev) => {
+      if (!res.writableEnded) {
+        res.write(formatSseEvent(ev))
+      }
+    })
+
+    req.on('close', unsub)
   })
 
   // --------------------------------------------------------

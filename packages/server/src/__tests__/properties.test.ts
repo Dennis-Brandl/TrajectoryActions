@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
@@ -45,6 +46,7 @@ interface TestHarness {
   app: express.Express
   manager: InstanceManager
   environmentRepo: EnvironmentRepository
+  sseManager: SseManager
   db: BetterSqlite3.Database
 }
 
@@ -97,7 +99,7 @@ function createHarness(): TestHarness {
   app.use('/trajectory/v1', createCommandsRouter(manager, sseManager))
   app.use(errorHandler)
 
-  return { app, manager, environmentRepo, db }
+  return { app, manager, environmentRepo, sseManager, db }
 }
 
 // ============================================================
@@ -228,5 +230,49 @@ describe('GET /trajectory/v1/properties and /trajectory/v1/properties/:id', () =
     expect(res.body.error.details.environment_oids).toEqual(
       expect.arrayContaining(['env-1', 'env-2'])
     )
+  }, 30000)
+
+  it('streams property events via SSE', async () => {
+    const { app, sseManager } = harness
+
+    // supertest doesn't support streaming — spin up a real server
+    const server = http.createServer(app)
+    await new Promise<void>((resolve) => server.listen(0, resolve))
+    const addr = server.address() as { port: number }
+
+    try {
+      const text = await new Promise<string>((resolve, reject) => {
+        const req = http.get(
+          `http://localhost:${addr.port}/trajectory/v1/properties/SIM_MODE/events?environment_oid=env-1`,
+          { headers: { Accept: 'text/event-stream' } },
+          (res) => {
+            let buf = ''
+            res.on('data', (chunk: Buffer) => {
+              buf += chunk.toString()
+              if (buf.includes('event: property')) {
+                res.destroy()
+                resolve(buf)
+              }
+            })
+            res.on('error', reject)
+            // Once we have a live connection, publish a property event
+            setTimeout(() => {
+              sseManager.publishProperty('env-1', 'SIM_MODE', {
+                entries: [{ name: 'Mode', value: 'fast' }],
+                changed_entries: ['Mode'],
+                source: 'action_code',
+              })
+            }, 50)
+          }
+        )
+        req.on('error', reject)
+        setTimeout(() => reject(new Error('SSE test timed out')), 5000)
+      })
+
+      expect(text).toContain('event: property')
+      expect(text).toContain('"property_name":"SIM_MODE"')
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
   }, 30000)
 })
