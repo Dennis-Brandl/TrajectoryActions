@@ -6,7 +6,7 @@ import type { Instance } from '@trajectory/storage'
 
 export interface SseEvent {
   id: number
-  type: 'state_change' | 'output' | 'log' | 'heartbeat'
+  type: 'state_change' | 'output' | 'log' | 'heartbeat' | 'property'
   data: Record<string, unknown>
 }
 
