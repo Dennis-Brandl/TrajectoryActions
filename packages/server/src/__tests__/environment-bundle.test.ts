@@ -85,7 +85,8 @@ function createHarness(): TestHarness {
       codeVersionRepo,
       instanceRepo,
       logRepo,
-      settingsRepo
+      settingsRepo,
+      sseManager
     )
   )
   app.use(errorHandler)

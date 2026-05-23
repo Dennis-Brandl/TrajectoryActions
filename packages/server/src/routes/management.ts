@@ -19,6 +19,7 @@ import type {
 import { createTransactionHelper } from '@trajectory/storage'
 import type { LogQueryFilters } from '@trajectory/storage'
 import { validateBody } from '../validation.js'
+import type { SseManager } from '../sse-manager.js'
 
 // ============================================================
 // Python version cache (set once on first factory call)
@@ -70,7 +71,8 @@ export function createManagementRouter(
   codeVersionRepo: CodeVersionRepository,
   instanceRepo: InstanceRepository,
   logRepo: LogRepository,
-  settingsRepo: SettingsRepository
+  settingsRepo: SettingsRepository,
+  sseManager: SseManager
 ): Router {
   // Cache python version on first factory call
   if (cachedPythonVersion === null) {
@@ -1050,6 +1052,10 @@ export function createManagementRouter(
         // Delete the environment itself
         environmentRepo.delete(oid)
       })
+
+      // Tear down per-property SSE buses for this env so active subscribers
+      // receive no further events and heartbeat timers are cleared.
+      sseManager.destroyPropertyBuses(oid)
 
       res.status(200).json({
         data: {

@@ -95,7 +95,8 @@ async function startTestServer(): Promise<TestApp> {
       codeVersionRepo,
       instanceRepo,
       logRepo,
-      settingsRepo
+      settingsRepo,
+      sseManager
     )
   )
   app.use(

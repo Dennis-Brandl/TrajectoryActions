@@ -110,7 +110,8 @@ function createTestApp(): TestApp {
       codeVersionRepo,
       instanceRepo,
       logRepo,
-      settingsRepo
+      settingsRepo,
+      sseManager
     )
   )
   app.use(errorHandler)

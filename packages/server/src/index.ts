@@ -126,7 +126,8 @@ app.use(
     codeVersionRepo,
     instanceRepo,
     logRepo,
-    settingsRepo
+    settingsRepo,
+    sseManager
   )
 )
 
