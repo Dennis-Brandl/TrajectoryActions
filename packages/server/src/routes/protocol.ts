@@ -304,6 +304,7 @@ export function createProtocolRouter(
     const envs = environmentRepo.findAll()
     const data = envs.map((env) => ({
       environment_oid: env.oid,
+      environment_name: env.local_id,
       properties: (env.action_property_specifications as Array<Record<string, unknown>>).map(
         (p) => ({
           name: p.name,
@@ -315,7 +316,10 @@ export function createProtocolRouter(
     }))
     res.status(200).json({
       data: { environments: data },
-      meta: { total: data.reduce((n, e) => n + e.properties.length, 0) },
+      meta: {
+        total_environments: data.length,
+        total_properties: data.reduce((n, e) => n + e.properties.length, 0),
+      },
     })
   })
 
@@ -361,6 +365,7 @@ export function createProtocolRouter(
     res.status(200).json({
       data: {
         environment_oid: env.oid,
+        environment_name: env.local_id,
         name: spec.name,
         oid: spec.oid,
         description: spec.description,

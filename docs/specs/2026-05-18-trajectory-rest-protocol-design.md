@@ -218,7 +218,7 @@ interface ActionCapability {
   visibility: 'observable' | 'opaque'
   input_parameters: ParameterSpec[]
   output_parameters: ParameterSpec[]
-  supported_commands: SupportedCommand[]
+  supported_commands: SupportedCommand[] // observable: all 7; opaque: ['ABORT'] only
 }
 
 type LifecycleState =
@@ -668,19 +668,15 @@ Emitted every 30 seconds while the instance is non-terminal. Stops at terminal s
 Emitted on the `GET /properties/:id/events` SSE stream whenever action code calls `set_property` for the subscribed property. Not emitted on instance event streams.
 
 ```ts
-interface PropertyEvent {
-  type: 'property'
-  id: number
-  data: {
-    environment_oid: string
-    property_name: string
-    entries: Array<{ name: string; value: string }>
-    changed_entries: string[]
-    source: 'action_code'
-    source_action_oid?: string
-    source_instance_id?: string
-    timestamp: string
-  }
+interface PropertyEventData {
+  environment_oid: string
+  property_name: string
+  entries: Array<{ name: string; value: string }>
+  changed_entries: string[]
+  source: 'action_code'
+  source_action_oid?: string
+  source_instance_id?: string
+  timestamp: string
 }
 ```
 

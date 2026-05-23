@@ -183,6 +183,7 @@ describe('GET /trajectory/v1/properties and /trajectory/v1/properties/:id', () =
       (e: { environment_oid: string }) => e.environment_oid === 'env-1'
     )
     expect(env1).toBeDefined()
+    expect(env1.environment_name).toBe('Env1')
     expect(env1.properties).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: 'SIM_MODE', entries: expect.any(Array) }),
@@ -194,11 +195,13 @@ describe('GET /trajectory/v1/properties and /trajectory/v1/properties/:id', () =
       (e: { environment_oid: string }) => e.environment_oid === 'env-2'
     )
     expect(env2).toBeDefined()
+    expect(env2.environment_name).toBe('Env2')
     expect(env2.properties).toHaveLength(1)
     expect(env2.properties[0].name).toBe('SIM_MODE')
 
-    // meta.total = total property count across all envs (2 + 1 = 3)
-    expect(res.body.meta.total).toBe(3)
+    // meta: split into total_environments and total_properties (2 + 1 = 3 properties across 2 envs)
+    expect(res.body.meta.total_environments).toBe(2)
+    expect(res.body.meta.total_properties).toBe(3)
   }, 30000)
 
   it('returns a single property by outer name with ?environment_oid filter', async () => {
@@ -208,6 +211,7 @@ describe('GET /trajectory/v1/properties and /trajectory/v1/properties/:id', () =
     expect(res.status).toBe(200)
     expect(res.body.data).toMatchObject({
       environment_oid: 'env-1',
+      environment_name: 'Env1',
       name: 'SIM_MODE',
       entries: expect.any(Array),
     })
