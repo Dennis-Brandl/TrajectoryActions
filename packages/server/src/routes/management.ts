@@ -6,6 +6,33 @@ import JSZip from 'jszip'
 import type BetterSqlite3 from 'better-sqlite3'
 import { createExportImportRouter } from './export-import.js'
 import type { InstanceManager } from '@trajectory/engine'
+import {
+  OBSERVABLE_STATES,
+  OPAQUE_STATES,
+  TRANSITION_TABLE,
+  OPAQUE_TRANSITION_TABLE,
+} from '@trajectory/engine'
+
+// Valid code-states per visibility = state enum ∪ all states reachable in the
+// transition table. Opaque actions transition through ABORTING/STOPPING via
+// ABORT/STOP commands even though those aren't in OPAQUE_STATES — so we must
+// also accept them as legitimate code-save targets.
+function reachableStates(table: Map<string, Map<string, string>>): Set<string> {
+  const set = new Set<string>()
+  for (const [from, transitions] of table) {
+    set.add(from)
+    for (const to of transitions.values()) set.add(to)
+  }
+  return set
+}
+const VALID_OBSERVABLE_CODE_STATES: ReadonlySet<string> = new Set([
+  ...OBSERVABLE_STATES,
+  ...reachableStates(TRANSITION_TABLE),
+])
+const VALID_OPAQUE_CODE_STATES: ReadonlySet<string> = new Set([
+  ...OPAQUE_STATES,
+  ...reachableStates(OPAQUE_TRANSITION_TABLE),
+])
 import type {
   EnvironmentRepository,
   ActionRepository,
@@ -2079,6 +2106,29 @@ export function createManagementRouter(
             code: 'NOT_FOUND',
             message: 'Action not found',
             details: {},
+          },
+        })
+      }
+
+      // Validate :state matches the action's visibility state machine.
+      // Reject states that the action can never reach so code isn't silently
+      // saved for a never-executed state (a real silent-fail trap caught by
+      // the 2026-05-23 smoke test).
+      const validStates =
+        action.action_visibility === 'opaque'
+          ? VALID_OPAQUE_CODE_STATES
+          : VALID_OBSERVABLE_CODE_STATES
+      if (!validStates.has(state)) {
+        const sorted = [...validStates].sort()
+        return void res.status(400).json({
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: `State '${state}' is not valid for action visibility '${action.action_visibility}'. Valid states: ${sorted.join(', ')}`,
+            details: {
+              state,
+              action_visibility: action.action_visibility,
+              valid_states: sorted,
+            },
           },
         })
       }
