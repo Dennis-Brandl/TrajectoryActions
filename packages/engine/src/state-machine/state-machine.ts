@@ -52,6 +52,8 @@ export interface CodeExecutionResult {
   execution_time_ms: number
   stdout_capture: string
   stderr_capture: string
+  /** Property mutations emitted by the Python sidecar (via trajectory.set_property). */
+  property_mutations?: Array<{ spec_name: string; entry_name: string; value: string }>
 }
 
 /**
@@ -78,6 +80,16 @@ export interface StateMachineCallbacks {
   onStateChange?: (instanceId: string, state: string, instance: Instance) => void
   onTerminal?: (instanceId: string, state: string, instance: Instance) => void
   onError?: (instanceId: string, error: Error) => void
+  /**
+   * Called after each code execution when the sidecar returned property_mutations.
+   * InstanceManager uses this to persist mutations to storage and publish SSE.
+   */
+  onPropertyMutations?: (
+    instanceId: string,
+    environmentOid: string,
+    actionOid: string,
+    mutations: Array<{ spec_name: string; entry_name: string; value: string }>
+  ) => void
 }
 
 // ============================================================
@@ -336,6 +348,22 @@ export class StateMachine {
       this.deferredCommands.delete(instanceId)
       await this.sendCommand(instanceId, deferredCommand)
       return
+    }
+
+    // Notify InstanceManager of any property mutations from this execution.
+    // Called regardless of success/failure so partial mutations on error paths
+    // are still applied (matches Python sidecar behavior).
+    if (
+      this.callbacks?.onPropertyMutations &&
+      result.property_mutations &&
+      result.property_mutations.length > 0
+    ) {
+      this.callbacks.onPropertyMutations(
+        instanceId,
+        instance.environment_oid,
+        instance.action_oid,
+        result.property_mutations
+      )
     }
 
     if (result.success) {

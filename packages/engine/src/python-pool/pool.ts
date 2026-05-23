@@ -12,6 +12,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { PythonWorker } from './worker.js'
+import { EngineError } from '../errors.js'
 import type { SidecarRequest } from './types.js'
 import type { CodeExecutionResult } from '../state-machine/state-machine.js'
 
@@ -224,6 +225,13 @@ export class PythonWorkerPool {
 
     try {
       const response = await worker.execute(request)
+
+      // PROPERTY_WRITE_ERROR: sidecar reports a property persistence failure.
+      // Surface as an EngineError rather than a silent execution failure.
+      if (!response.success && response.error_type === 'PROPERTY_WRITE_ERROR') {
+        throw new EngineError('PROPERTY_WRITE_ERROR', response.error ?? 'Property write failed')
+      }
+
       return {
         success: response.success,
         outputs: response.outputs,
@@ -234,8 +242,13 @@ export class PythonWorkerPool {
         execution_time_ms: response.execution_time_ms,
         stdout_capture: response.stdout_capture,
         stderr_capture: response.stderr_capture,
+        property_mutations: response.property_mutations ?? [],
       }
     } catch (err) {
+      // Re-throw EngineErrors (e.g. PROPERTY_WRITE_ERROR) directly
+      if (err instanceof EngineError) {
+        throw err
+      }
       // Worker crash or timeout — return WORKER_CRASH result
       const error = err instanceof Error ? err.message : 'Worker execution failed'
       return {
