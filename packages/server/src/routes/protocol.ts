@@ -2,6 +2,7 @@ import { Router } from 'express'
 import type { InstanceManager } from '@trajectory/engine'
 import type {
   ActionRepository,
+  EnvironmentRepository,
   InstanceRepository,
   SettingsRepository,
   Instance,
@@ -98,13 +99,16 @@ function formatInstanceResponse(instance: Instance) {
  *   GET  /instances/:id                — REST-04
  *   GET  /instances                    — REST-08
  *   DELETE /instances/:id              — REST-09
+ *   GET  /properties                   — REST-10
+ *   GET  /properties/:id               — REST-11
  */
 export function createProtocolRouter(
   manager: InstanceManager,
   actionRepo: ActionRepository,
   instanceRepo: InstanceRepository,
   _settingsRepo: SettingsRepository,
-  _sseManager: SseManager
+  _sseManager: SseManager,
+  environmentRepo: EnvironmentRepository
 ): Router {
   // _settingsRepo and _sseManager reserved for plan 05-02 (SSE streaming, expose_traceback)
   void _settingsRepo
@@ -269,6 +273,79 @@ export function createProtocolRouter(
     } catch (err) {
       next(err)
     }
+  })
+
+  // --------------------------------------------------------
+  // REST-10: GET /properties — list property specs across all envs
+  // --------------------------------------------------------
+  router.get('/properties', (_req, res) => {
+    const envs = environmentRepo.findAll()
+    const data = envs.map((env) => ({
+      environment_oid: env.oid,
+      properties: (env.action_property_specifications as Array<Record<string, unknown>>).map(
+        (p) => ({
+          name: p.name,
+          oid: p.oid,
+          description: p.description,
+          entries: (p.entries as unknown[]) ?? [],
+        })
+      ),
+    }))
+    res.status(200).json({
+      data: { environments: data },
+      meta: { total: data.reduce((n, e) => n + e.properties.length, 0) },
+    })
+  })
+
+  // --------------------------------------------------------
+  // REST-11: GET /properties/:id — single property by outer name
+  // --------------------------------------------------------
+  router.get('/properties/:id', (req, res) => {
+    const propertyName = req.params.id
+    const envOidFilter = (req.query.environment_oid as string | undefined) ?? undefined
+    const envs = environmentRepo.findAll()
+    const matches: Array<{
+      env: (typeof envs)[number]
+      spec: Record<string, unknown>
+    }> = []
+    for (const env of envs) {
+      if (envOidFilter && env.oid !== envOidFilter) continue
+      const spec = (env.action_property_specifications as Array<Record<string, unknown>>).find(
+        (p) => p.name === propertyName
+      )
+      if (spec) matches.push({ env, spec })
+    }
+    if (matches.length === 0) {
+      res.status(404).json({
+        error: {
+          code: 'PROPERTY_NOT_FOUND',
+          message: `Property '${propertyName}' not found`,
+          details: {},
+        },
+      })
+      return
+    }
+    if (matches.length > 1) {
+      res.status(409).json({
+        error: {
+          code: 'AMBIGUOUS_PROPERTY',
+          message: `Property '${propertyName}' found in ${matches.length} environments`,
+          details: { environment_oids: matches.map((m) => m.env.oid) },
+        },
+      })
+      return
+    }
+    const { env, spec } = matches[0]
+    res.status(200).json({
+      data: {
+        environment_oid: env.oid,
+        name: spec.name,
+        oid: spec.oid,
+        description: spec.description,
+        entries: (spec.entries as unknown[]) ?? [],
+      },
+      meta: {},
+    })
   })
 
   // --------------------------------------------------------

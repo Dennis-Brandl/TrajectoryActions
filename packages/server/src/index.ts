@@ -110,7 +110,7 @@ app.use('/trajectory/v1', createApiKeyAuth(settingsRepo))
 
 app.use(
   '/trajectory/v1',
-  createProtocolRouter(manager, actionRepo, instanceRepo, settingsRepo, sseManager)
+  createProtocolRouter(manager, actionRepo, instanceRepo, settingsRepo, sseManager, environmentRepo)
 )
 
 app.use('/trajectory/v1', createCommandsRouter(manager, sseManager))
