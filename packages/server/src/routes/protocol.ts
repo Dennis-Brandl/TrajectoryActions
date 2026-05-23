@@ -135,30 +135,51 @@ export function createProtocolRouter(
   // REST-02: GET /capabilities
   // --------------------------------------------------------
   router.get('/capabilities', (_req, res) => {
-    const actions = actionRepo.findAll()
+    const envs = environmentRepo.findAll()
+    const allActions = actionRepo.findAll()
 
-    const data = actions.map((action) => ({
-      action_oid: action.oid,
-      environment_oid: action.environment_oid,
-      local_id: action.local_id,
-      version: action.version,
-      description: action.description,
-      visibility: action.action_visibility,
-      input_parameters: (action.input_parameter_specifications as unknown[]).map(
-        normalizeParameterSpec
-      ),
-      output_parameters: (action.output_parameter_specifications as unknown[]).map(
-        normalizeParameterSpec
-      ),
-      supported_commands:
-        action.action_visibility === 'observable'
-          ? ['PAUSE', 'RESUME', 'HOLD', 'UNHOLD', 'ABORT', 'STOP', 'CLEAR']
-          : ['ABORT'],
-    }))
+    const data = envs.map((env) => {
+      const actions = allActions.filter((a) => a.environment_oid === env.oid)
+      return {
+        environment_oid: env.oid,
+        environment_name: env.local_id,
+        environment_state: env.state ?? 'Draft',
+        action_properties: (
+          env.action_property_specifications as Array<Record<string, unknown>>
+        ).map((p) => ({
+          name: p.name,
+          oid: p.oid,
+          description: p.description,
+          entries: (p.entries as unknown[]) ?? [],
+        })),
+        actions: actions.map((action) => ({
+          action_oid: action.oid,
+          action_name: action.local_id,
+          action_state: action.state ?? 'Draft',
+          local_id: action.local_id,
+          version: action.version,
+          description: action.description,
+          visibility: action.action_visibility,
+          input_parameters: (action.input_parameter_specifications as unknown[]).map(
+            normalizeParameterSpec
+          ),
+          output_parameters: (action.output_parameter_specifications as unknown[]).map(
+            normalizeParameterSpec
+          ),
+          supported_commands:
+            action.action_visibility === 'observable'
+              ? ['PAUSE', 'RESUME', 'HOLD', 'UNHOLD', 'ABORT', 'STOP', 'CLEAR']
+              : ['ABORT'],
+        })),
+      }
+    })
 
     res.status(200).json({
-      data,
-      meta: { total: data.length },
+      data: { environments: data },
+      meta: {
+        total_environments: data.length,
+        total_actions: data.reduce((n, e) => n + e.actions.length, 0),
+      },
     })
   })
 
