@@ -19,9 +19,9 @@ import request from 'supertest'
 import {
   initializeDatabase,
   ActionRepository,
+  EnvironmentRepository,
   InstanceRepository,
   SettingsRepository,
-  EnvironmentRepository,
 } from '@trajectory/storage'
 import type BetterSqlite3 from 'better-sqlite3'
 import { InstanceManager } from '@trajectory/engine'
@@ -57,6 +57,7 @@ interface TestApp {
 function createTestApp(): TestApp {
   const db = initializeDatabase(':memory:')
   const actionRepo = new ActionRepository(db)
+  const environmentRepo = new EnvironmentRepository(db)
   const instanceRepo = new InstanceRepository(db)
   const settingsRepo = new SettingsRepository(db)
   const sseManager = new SseManager()
@@ -90,7 +91,14 @@ function createTestApp(): TestApp {
   app.use(express.json())
   app.use(
     '/trajectory/v1',
-    createProtocolRouter(manager, actionRepo, instanceRepo, settingsRepo, sseManager)
+    createProtocolRouter(
+      manager,
+      actionRepo,
+      instanceRepo,
+      settingsRepo,
+      sseManager,
+      environmentRepo
+    )
   )
   app.use('/trajectory/v1', createCommandsRouter(manager, sseManager))
   app.use(errorHandler)

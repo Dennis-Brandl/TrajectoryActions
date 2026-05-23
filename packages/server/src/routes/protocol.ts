@@ -7,16 +7,9 @@ import type {
   SettingsRepository,
   Instance,
 } from '@trajectory/storage'
-import type { SseManager, SseEvent } from '../sse-manager.js'
+import type { SseManager } from '../sse-manager.js'
+import { formatSseEvent } from '../sse-utils.js'
 import { validateBody } from '../validation.js'
-
-// ============================================================
-// SSE event formatter (mirrors commands.ts)
-// ============================================================
-
-function formatSseEvent(event: SseEvent): string {
-  return `event: ${event.type}\nid: ${event.id}\ndata: ${JSON.stringify(event.data)}\n\n`
-}
 
 // ============================================================
 // Response shape helper
@@ -100,7 +93,7 @@ function formatInstanceResponse(instance: Instance) {
 /**
  * createProtocolRouter — Express Router with all /trajectory/v1/ endpoints.
  *
- * Endpoints (plan 05-01):
+ * Endpoints:
  *   GET  /health                       — REST-01
  *   GET  /capabilities                 — REST-02
  *   POST /actions/:action_oid/invoke   — REST-03
@@ -109,6 +102,7 @@ function formatInstanceResponse(instance: Instance) {
  *   DELETE /instances/:id              — REST-09
  *   GET  /properties                   — REST-10
  *   GET  /properties/:id               — REST-11
+ *   GET  /properties/:id/events        — REST-12 (SSE stream)
  */
 export function createProtocolRouter(
   manager: InstanceManager,

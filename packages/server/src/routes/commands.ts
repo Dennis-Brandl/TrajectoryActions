@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import type { InstanceManager } from '@trajectory/engine'
 import type { SseManager, SseEvent } from '../sse-manager.js'
+import { formatSseEvent } from '../sse-utils.js'
 import { validateBody } from '../validation.js'
 
 // ============================================================
@@ -8,18 +9,6 @@ import { validateBody } from '../validation.js'
 // ============================================================
 
 const VALID_COMMANDS = new Set(['PAUSE', 'RESUME', 'HOLD', 'UNHOLD', 'ABORT', 'STOP', 'CLEAR'])
-
-// ============================================================
-// SSE event formatter
-// ============================================================
-
-function formatSseEvent(event: SseEvent): string {
-  let msg = `event: ${event.type}\n`
-  msg += `id: ${event.id}\n`
-  msg += `data: ${JSON.stringify(event.data)}\n`
-  msg += '\n'
-  return msg
-}
 
 // ============================================================
 // Commands router factory
