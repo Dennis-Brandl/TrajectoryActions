@@ -1,5 +1,11 @@
 import type { Instance } from '@trajectory/storage'
 
+export interface PropertyMutation {
+  spec_name: string
+  entry_name: string
+  value: string
+}
+
 export interface InvokeRequest {
   action_oid: string
   workflow_instance_id: string

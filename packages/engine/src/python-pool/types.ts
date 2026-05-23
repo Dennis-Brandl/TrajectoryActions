@@ -37,4 +37,5 @@ export interface SidecarResponse {
   error?: string
   error_type?: 'SYNTAX_ERROR' | 'RUNTIME_ERROR' | 'TIMEOUT' | 'WORKER_CRASH'
   traceback?: string
+  property_mutations?: Array<{ spec_name: string; entry_name: string; value: string }>
 }

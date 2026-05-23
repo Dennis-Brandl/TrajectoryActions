@@ -64,6 +64,7 @@ export type {
   InvokeRequest,
   InvokeResult,
   InstanceManagerOptions,
+  PropertyMutation,
 } from './instance-manager/types.js'
 
 // ============================================================
