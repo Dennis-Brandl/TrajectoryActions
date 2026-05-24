@@ -11,13 +11,14 @@ const navItems = [
 
 export default function TopNav() {
   const { theme, toggleTheme, searchQuery, setSearchQuery, setActivePanel } = usePanelContext()
-  const logoSrc = theme === 'dark' ? '/trajectory-dark.png' : '/trajectory-light.png'
+  const serverUrl = `${window.location.origin}/trajectory/v1/`
 
   return (
     <header className="flex items-center h-10 px-3 bg-[var(--activity-bar)] border-b border-border shrink-0">
       <div className="flex items-center gap-2 mr-6">
-        <img src={logoSrc} alt="Trajectory" className="h-6 w-6 object-contain" />
+        <img src="/ic_launcher_round.png" alt="Trajectory" className="h-6 w-6 object-contain" />
         <span className="text-sm font-semibold text-foreground">Trajectory Action Container</span>
+        <span className="text-xs text-muted-foreground">v{__APP_VERSION__}</span>
       </div>
       <nav className="flex items-center gap-0.5">
         {navItems.map(({ to, label, end }) => (
@@ -38,6 +39,15 @@ export default function TopNav() {
           </NavLink>
         ))}
       </nav>
+      <div
+        className="ml-4 flex items-center gap-1.5 text-xs text-muted-foreground"
+        title="Register this URL in TrajectoryRuntime to invoke actions on this server"
+      >
+        <span className="text-muted-foreground/70">Server:</span>
+        <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground">
+          {serverUrl}
+        </code>
+      </div>
       <div className="flex-1" />
       <div className="flex items-center gap-2 px-2 py-1 rounded bg-muted text-muted-foreground text-xs w-48 focus-within:ring-1 focus-within:ring-primary">
         <Search size={12} className="shrink-0" />
