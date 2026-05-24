@@ -4,6 +4,7 @@ import { openDatabase } from '../database.js'
 import { runMigrations } from '../migrations/runner.js'
 import { migration as initialMigration } from '../migrations/001-initial-schema.js'
 import { migration as actionTimeoutMigration } from '../migrations/002-action-timeout.js'
+import { migration as lifecycleStateMigration } from '../migrations/003-lifecycle-state.js'
 import { EnvironmentRepository } from '../repositories/environment.repository.js'
 import { ActionRepository } from '../repositories/action.repository.js'
 import { CodeVersionRepository } from '../repositories/code-version.repository.js'
@@ -54,7 +55,7 @@ describe('CodeVersionRepository', () => {
 
   beforeEach(() => {
     db = openDatabase(':memory:')
-    runMigrations(db, [initialMigration, actionTimeoutMigration])
+    runMigrations(db, [initialMigration, actionTimeoutMigration, lifecycleStateMigration])
 
     const envRepo = new EnvironmentRepository(db)
     const actionRepo = new ActionRepository(db)

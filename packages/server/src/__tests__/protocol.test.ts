@@ -19,9 +19,9 @@ import request from 'supertest'
 import {
   initializeDatabase,
   ActionRepository,
+  EnvironmentRepository,
   InstanceRepository,
   SettingsRepository,
-  EnvironmentRepository,
 } from '@trajectory/storage'
 import type BetterSqlite3 from 'better-sqlite3'
 import { InstanceManager } from '@trajectory/engine'
@@ -57,6 +57,7 @@ interface TestApp {
 function createTestApp(): TestApp {
   const db = initializeDatabase(':memory:')
   const actionRepo = new ActionRepository(db)
+  const environmentRepo = new EnvironmentRepository(db)
   const instanceRepo = new InstanceRepository(db)
   const settingsRepo = new SettingsRepository(db)
   const sseManager = new SseManager()
@@ -90,7 +91,14 @@ function createTestApp(): TestApp {
   app.use(express.json())
   app.use(
     '/trajectory/v1',
-    createProtocolRouter(manager, actionRepo, instanceRepo, settingsRepo, sseManager)
+    createProtocolRouter(
+      manager,
+      actionRepo,
+      instanceRepo,
+      settingsRepo,
+      sseManager,
+      environmentRepo
+    )
   )
   app.use('/trajectory/v1', createCommandsRouter(manager, sseManager))
   app.use(errorHandler)
@@ -107,19 +115,15 @@ function seedTestAction(
   opts?: {
     visibility?: 'observable' | 'opaque'
     oid?: string
-    inputSpecs?: Array<{
-      name: string
-      type: string
-      required: boolean
-      default_value: string | null
-      description: string
-    }>
+    inputSpecs?: Array<Record<string, unknown>>
+    envOid?: string
+    actionPropertySpecs?: Array<Record<string, unknown>>
   }
 ): string {
   const envRepo = new EnvironmentRepository(db)
   const actionRepo = new ActionRepository(db)
 
-  const envOid = 'env-test-001'
+  const envOid = opts?.envOid ?? 'env-test-001'
   // Only create env if not already present
   if (!envRepo.findByOid(envOid)) {
     envRepo.create({
@@ -128,7 +132,7 @@ function seedTestAction(
       version: '1.0',
       last_modified_date: new Date().toISOString(),
       schema_version: '1.0',
-      action_property_specifications: [],
+      action_property_specifications: opts?.actionPropertySpecs ?? [],
       value_property_specifications: [],
       resource_property_specifications: [],
       source_filename: 'test.WFenvir',
@@ -192,27 +196,81 @@ describe('GET /trajectory/v1/health', () => {
 // ============================================================
 
 describe('GET /trajectory/v1/capabilities', () => {
-  it('returns empty array when no actions seeded', async () => {
-    const { app, manager } = createTestApp()
+  it('returns env-grouped capabilities with action_properties and lifecycle states', async () => {
+    const { app, manager, db } = createTestApp()
     try {
+      // Seed: one env with two actions; env has action_property_specifications with SIM_MODE
+      seedTestAction(db, {
+        visibility: 'observable',
+        oid: 'action-test-001',
+        actionPropertySpecs: [
+          {
+            name: 'SIM_MODE',
+            oid: 'prop-sim-001',
+            description: 'Simulation mode flag',
+            entries: [{ name: 'Value', value: 'true' }],
+          },
+        ],
+      })
+      seedTestAction(db, {
+        visibility: 'opaque',
+        oid: 'action-test-002',
+        // env already created above; envOid defaults to 'env-test-001'
+      })
       const res = await request(app).get('/trajectory/v1/capabilities')
       expect(res.status).toBe(200)
-      expect(res.body.data).toEqual([])
-      expect(res.body.meta.total).toBe(0)
+      expect(res.body.data.environments).toHaveLength(1)
+      const env = res.body.data.environments[0]
+      expect(env).toMatchObject({
+        environment_oid: expect.any(String),
+        environment_name: expect.any(String),
+        environment_state: expect.stringMatching(
+          /^(Draft|InTest|InReview|Approved|Effective|Superseded|Obsolete)$/
+        ),
+        action_properties: expect.arrayContaining([
+          expect.objectContaining({ name: 'SIM_MODE', entries: expect.any(Array) }),
+        ]),
+        actions: expect.arrayContaining([
+          expect.objectContaining({
+            action_oid: expect.any(String),
+            action_name: expect.any(String),
+            action_state: expect.stringMatching(
+              /^(Draft|InTest|InReview|Approved|Effective|Superseded|Obsolete)$/
+            ),
+          }),
+        ]),
+      })
+      expect(res.body.meta).toMatchObject({ total_environments: 1, total_actions: 2 })
     } finally {
       await manager.shutdown()
     }
   }, 30000)
 
-  it('returns observable action with full command set after seeding', async () => {
+  it('returns empty environments list when no envs seeded', async () => {
+    const { app, manager } = createTestApp()
+    try {
+      const res = await request(app).get('/trajectory/v1/capabilities')
+      expect(res.status).toBe(200)
+      expect(res.body.data.environments).toEqual([])
+      expect(res.body.meta.total_environments).toBe(0)
+      expect(res.body.meta.total_actions).toBe(0)
+    } finally {
+      await manager.shutdown()
+    }
+  }, 30000)
+
+  it('groups observable action with full command set under its environment', async () => {
     const { app, manager, db } = createTestApp()
     try {
       seedTestAction(db, { visibility: 'observable' })
       const res = await request(app).get('/trajectory/v1/capabilities')
       expect(res.status).toBe(200)
-      expect(res.body.data).toHaveLength(1)
-      const action = res.body.data[0]
-      expect(action.action_oid).toBe('action-test-001')
+      expect(res.body.data.environments).toHaveLength(1)
+      const env = res.body.data.environments[0]
+      const action = env.actions.find(
+        (a: { action_oid: string }) => a.action_oid === 'action-test-001'
+      )
+      expect(action).toBeDefined()
       expect(action.visibility).toBe('observable')
       expect(action.supported_commands).toContain('PAUSE')
       expect(action.supported_commands).toContain('RESUME')
@@ -222,13 +280,14 @@ describe('GET /trajectory/v1/capabilities', () => {
     }
   }, 30000)
 
-  it('returns opaque action with only ABORT command', async () => {
+  it('groups opaque action with only ABORT command under its environment', async () => {
     const { app, manager, db } = createTestApp()
     try {
       seedTestAction(db, { visibility: 'opaque', oid: 'action-opaque-001' })
       const res = await request(app).get('/trajectory/v1/capabilities')
       expect(res.status).toBe(200)
-      const opaque = res.body.data.find(
+      const env = res.body.data.environments[0]
+      const opaque = env.actions.find(
         (a: { action_oid: string }) => a.action_oid === 'action-opaque-001'
       )
       expect(opaque).toBeDefined()
@@ -271,7 +330,8 @@ describe('GET /trajectory/v1/capabilities', () => {
       })
       const res = await request(app).get('/trajectory/v1/capabilities')
       expect(res.status).toBe(200)
-      const mixed = res.body.data.find(
+      const env = res.body.data.environments[0]
+      const mixed = env.actions.find(
         (a: { action_oid: string }) => a.action_oid === 'action-mixed-001'
       )
       expect(mixed).toBeDefined()

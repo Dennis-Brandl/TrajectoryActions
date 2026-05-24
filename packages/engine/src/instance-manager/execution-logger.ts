@@ -43,6 +43,31 @@ export class ExecutionLogger {
       }
     }
 
+    // Build rich state_executions from state_history + execution metadata. The
+    // Console renders one row per entry with state name, code version (or "no
+    // code"), entered_at, and duration. The runtime appends a duplicate entry
+    // to state_history when stamping completed_at on a terminal state — those
+    // adjacent duplicates collapse so the Console doesn't show COMPLETED twice
+    // with a 0ms duration.
+    const stateHistory = instance.state_history as Array<{ state: string; timestamp: string }>
+    const executedSet = new Set(instance.states_with_code_executed as string[])
+    const collapsed: Array<{ state: string; timestamp: string }> = []
+    for (const entry of stateHistory) {
+      const prev = collapsed[collapsed.length - 1]
+      if (!prev || prev.state !== entry.state) collapsed.push(entry)
+    }
+    const stateExecutions = collapsed.map((entry, i) => {
+      const nextTimestamp = collapsed[i + 1]?.timestamp ?? completedAt
+      const duration = new Date(nextTimestamp).getTime() - new Date(entry.timestamp).getTime()
+      return {
+        state: entry.state,
+        had_code: executedSet.has(entry.state),
+        code_version_number: codeVersionsUsed[entry.state] ?? null,
+        entered_at: entry.timestamp,
+        duration_ms: Number.isFinite(duration) ? duration : null,
+      }
+    })
+
     this.logRepo.insert(
       {
         runtime_action_instance_id: instanceId,
@@ -54,7 +79,7 @@ export class ExecutionLogger {
         step_oid: instance.step_oid,
         input_parameters: instance.input_parameters,
         output_parameters: instance.output_parameters,
-        states_executed: instance.states_with_code_executed,
+        states_executed: stateExecutions,
         code_versions_used: codeVersionsUsed,
         started_at: startedAt,
         completed_at: completedAt,

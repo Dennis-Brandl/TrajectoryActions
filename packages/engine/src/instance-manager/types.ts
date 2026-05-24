@@ -1,5 +1,31 @@
 import type { Instance } from '@trajectory/storage'
 
+export interface PropertyMutation {
+  spec_name: string
+  entry_name: string
+  value: string
+}
+
+/**
+ * Minimal structural interface for publishing property SSE events.
+ * Declared in engine so InstanceManager can depend on it without importing from
+ * the server package (which would violate the engine → server layering boundary).
+ * SseManager (packages/server) satisfies this interface implicitly via TS structural typing.
+ */
+export interface PropertySsePublisher {
+  publishProperty(
+    envOid: string,
+    propertyName: string,
+    data: {
+      entries: Array<{ name: string; value: string }>
+      changed_entries: string[]
+      source: 'action_code'
+      source_action_oid?: string
+      source_instance_id?: string
+    }
+  ): void
+}
+
 export interface InvokeRequest {
   action_oid: string
   workflow_instance_id: string
@@ -37,4 +63,12 @@ export interface InstanceManagerOptions {
   onStateChange?: (instanceId: string, state: string, instance: Instance) => void
   onTerminal?: (instanceId: string, state: string, instance: Instance) => void
   onError?: (instanceId: string, error: Error) => void
+  /**
+   * Optional SSE publisher for property mutation events.
+   * When provided, applyPropertyMutations() will call publishProperty() for
+   * each modified spec after code execution completes.
+   * Uses the PropertySsePublisher structural interface to avoid importing from
+   * the server package (layering boundary: engine must not import from server).
+   */
+  sseManager?: PropertySsePublisher
 }

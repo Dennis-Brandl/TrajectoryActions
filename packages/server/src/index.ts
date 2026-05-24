@@ -62,6 +62,8 @@ const sseManager = new SseManager()
 // InstanceManager wired with SseManager callbacks
 const manager = new InstanceManager(db, {
   scriptPath: SIDECAR_SCRIPT,
+  // sseManager satisfies PropertySsePublisher (structural typing — no explicit cast needed)
+  sseManager,
   onStateChange: (instanceId, state, instance) => {
     const history = instance.state_history as Array<{ state: string; timestamp: string }>
     const previousState = history.length >= 2 ? (history[history.length - 2]?.state ?? null) : null
@@ -108,7 +110,7 @@ app.use('/trajectory/v1', createApiKeyAuth(settingsRepo))
 
 app.use(
   '/trajectory/v1',
-  createProtocolRouter(manager, actionRepo, instanceRepo, settingsRepo, sseManager)
+  createProtocolRouter(manager, actionRepo, instanceRepo, settingsRepo, sseManager, environmentRepo)
 )
 
 app.use('/trajectory/v1', createCommandsRouter(manager, sseManager))
@@ -124,7 +126,8 @@ app.use(
     codeVersionRepo,
     instanceRepo,
     logRepo,
-    settingsRepo
+    settingsRepo,
+    sseManager
   )
 )
 

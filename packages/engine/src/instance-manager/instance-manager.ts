@@ -14,7 +14,13 @@ import { StateMachine } from '../state-machine/state-machine.js'
 import type { CodeExecutor, CodeExecutionResult } from '../state-machine/state-machine.js'
 import { ExecutionLogger } from './execution-logger.js'
 import { resolveInputParameters } from './parameter-resolver.js'
-import type { InvokeRequest, InvokeResult, InstanceManagerOptions } from './types.js'
+import type {
+  InvokeRequest,
+  InvokeResult,
+  InstanceManagerOptions,
+  PropertyMutation,
+  PropertySsePublisher,
+} from './types.js'
 
 // ============================================================
 // States that are exempt from retry (ABORTING/STOPPING/CLEARING)
@@ -53,6 +59,13 @@ export class InstanceManager {
     'onStateChange' | 'onTerminal' | 'onError'
   >
   /**
+   * Optional SSE publisher for property mutation events.
+   * Uses the PropertySsePublisher structural interface to avoid importing
+   * from the server package (layering boundary: engine must not import from server).
+   * The actual SseManager from packages/server satisfies this interface implicitly.
+   */
+  private readonly sseManager?: PropertySsePublisher
+  /**
    * Per-invoke `action_property_overrides`, keyed by runtime instance id.
    * Set in `invoke()` when the caller supplies overrides; deleted in the
    * `onTerminal` callback to bound memory growth.
@@ -87,6 +100,9 @@ export class InstanceManager {
       onTerminal: options.onTerminal,
       onError: options.onError,
     }
+
+    // Stash optional SSE publisher for property mutation events
+    this.sseManager = options.sseManager
 
     // Determine pool size: SettingsRepository setting > options.poolSize > default 4
     let poolSize: number
@@ -129,6 +145,9 @@ export class InstanceManager {
         },
         onError: (instanceId, error) => {
           this.callbacks.onError?.(instanceId, error)
+        },
+        onPropertyMutations: (instanceId, environmentOid, actionOid, mutations) => {
+          this.applyPropertyMutations(environmentOid, actionOid, instanceId, mutations)
         },
       },
       this.actionRepo,
@@ -187,6 +206,72 @@ export class InstanceManager {
       }
 
       return result
+    }
+  }
+
+  // ============================================================
+  // Private: apply property mutations from sidecar
+  // ============================================================
+
+  /**
+   * Persist property mutations to environment storage and publish SSE events.
+   * Called by the StateMachine's onPropertyMutations callback after each code execution.
+   *
+   * @param environment_oid - OID of the environment to update
+   * @param source_action_oid - OID of the action whose code emitted the mutations
+   * @param source_instance_id - runtime_action_instance_id of the executing instance
+   * @param mutations - list of {spec_name, entry_name, value} mutations from the sidecar
+   */
+  private applyPropertyMutations(
+    environment_oid: string,
+    source_action_oid: string,
+    source_instance_id: string,
+    mutations: PropertyMutation[]
+  ): void {
+    if (mutations.length === 0) return
+
+    const env = this.environmentRepo.findByOid(environment_oid)
+    if (!env) return
+
+    const specs = env.action_property_specifications as Array<{
+      name: string
+      oid?: string
+      description?: string
+      entries: Array<{ name: string; value: string }>
+    }>
+
+    // Apply each mutation: update existing entry or append a new one
+    const touchedSpecNames = new Set<string>()
+    for (const m of mutations) {
+      const spec = specs.find((s) => s.name === m.spec_name)
+      if (!spec) continue
+      const entry = spec.entries.find((e) => e.name === m.entry_name)
+      if (entry) {
+        entry.value = m.value
+      } else {
+        spec.entries.push({ name: m.entry_name, value: m.value })
+      }
+      touchedSpecNames.add(m.spec_name)
+    }
+
+    // Persist the updated specs to storage
+    this.environmentRepo.update(environment_oid, { action_property_specifications: specs })
+
+    // Publish one SSE event per touched spec
+    if (this.sseManager) {
+      for (const specName of touchedSpecNames) {
+        const spec = specs.find((s) => s.name === specName)!
+        const changedEntries = [
+          ...new Set(mutations.filter((m) => m.spec_name === specName).map((m) => m.entry_name)),
+        ]
+        this.sseManager.publishProperty(environment_oid, specName, {
+          entries: spec.entries,
+          changed_entries: changedEntries,
+          source: 'action_code',
+          source_action_oid,
+          source_instance_id,
+        })
+      }
     }
   }
 

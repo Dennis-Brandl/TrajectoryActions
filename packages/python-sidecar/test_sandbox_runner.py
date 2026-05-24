@@ -323,3 +323,49 @@ class TestSandboxRunner(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+# ------------------------------------------------------------------
+# Direct-unit tests for run_user_code_with_mutations (pytest-style)
+# ------------------------------------------------------------------
+
+def test_set_property_emits_mutation_log():
+    """set_property is available as a global and records a mutation."""
+    source = """
+def execute(inputs, outputs, props, action_props):
+    set_property('SIM_MODE', 'Value', 'true')
+    return True
+"""
+    from sandbox_runner import run_user_code_with_mutations
+    return_value, _stdout, _stderr, mutations = run_user_code_with_mutations(
+        source, inputs={}, outputs={}, props={'SIM_MODE': {'Value': 'false'}}, action_props={}
+    )
+    assert return_value is True
+    assert mutations == [{'spec_name': 'SIM_MODE', 'entry_name': 'Value', 'value': 'true'}]
+
+
+def test_properties_global_matches_props_argument():
+    """The 'properties' global is the same dict as the props argument."""
+    source = """
+def execute(inputs, outputs, props, action_props):
+    return properties is props and action_properties is action_props
+"""
+    from sandbox_runner import run_user_code_with_mutations
+    return_value, _stdout, _stderr, _ = run_user_code_with_mutations(
+        source, inputs={}, outputs={}, props={'X': {'A': '1'}}, action_props={}
+    )
+    assert return_value is True
+
+
+def test_set_property_unknown_spec_raises():
+    """set_property with an unknown spec_name raises (and is tagged as PROPERTY_WRITE_ERROR via _PropertyWriteError)."""
+    source = """
+def execute(inputs, outputs, props, action_props):
+    set_property('UNKNOWN_SPEC', 'X', '1')
+    return True
+"""
+    from sandbox_runner import run_user_code_with_mutations
+    import pytest
+    with pytest.raises(RuntimeError, match='unknown property'):
+        run_user_code_with_mutations(source, inputs={}, outputs={},
+                                     props={}, action_props={})

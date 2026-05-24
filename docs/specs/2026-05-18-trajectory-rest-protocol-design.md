@@ -12,14 +12,14 @@ The Trajectory REST protocol is the public HTTP interface that workflow clients 
 
 | Property                | Value                                                                                                             |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Base URL                | `http://<host>:<port>/trajectory/v1`                                                                                |
+| Base URL                | `http://<host>:<port>/trajectory/v1`                                                                              |
 | Default port            | `3001` (override with `PORT` env var)                                                                             |
 | Mount                   | `packages/server/src/index.ts` mounts protocol + commands routers under this prefix                               |
 | Authentication          | Optional API key (see §1.1)                                                                                       |
 | CORS                    | `origin: '*'`, methods `GET, POST, PUT, DELETE, OPTIONS`, allowed headers include `X-API-Key` and `Last-Event-ID` |
 | Content type (request)  | `application/json` for body endpoints                                                                             |
 | Content type (response) | `application/json` for data endpoints, `text/event-stream` for SSE                                                |
-| Endpoint count          | 8                                                                                                                 |
+| Endpoint count          | 11                                                                                                                |
 
 ### 1.1 Authentication
 
@@ -107,17 +107,20 @@ interface ErrorEnvelope {
 
 ### 3.3 Error code catalog (this interface)
 
-| Code                          | Status | Source                     | Notes                                          |
-| ----------------------------- | ------ | -------------------------- | ---------------------------------------------- |
-| `VALIDATION_ERROR`            | 400    | `validateBody`, storage    | Body shape rejected; `message` names the field |
-| `UNAUTHORIZED`                | 401    | auth middleware            | Only when `api_key` setting is configured      |
-| `ACTION_NOT_FOUND`            | 404    | engine                     | Invoked action OID not in storage              |
-| `INSTANCE_NOT_FOUND`          | 404    | engine, handlers           | Instance lookup miss                           |
-| `INVALID_STATE_TRANSITION`    | 409    | engine                     | `details` carries `current_state`, `command`   |
-| `INVALID_COMMAND`             | 422    | commands router            | `details.command` echoes the rejected value    |
-| `PARAMETER_VALIDATION_FAILED` | 400    | engine                     | Inputs failed action-spec validation           |
-| `EXECUTION_ERROR`             | 500    | engine                     | Sidecar crash or runtime error                 |
-| `INTERNAL_ERROR`              | 500    | fallback in `errorHandler` | Unhandled exception                            |
+| Code                          | Status | Source                     | Notes                                                                                |
+| ----------------------------- | ------ | -------------------------- | ------------------------------------------------------------------------------------ |
+| `VALIDATION_ERROR`            | 400    | `validateBody`, storage    | Body shape rejected; `message` names the field                                       |
+| `UNAUTHORIZED`                | 401    | auth middleware            | Only when `api_key` setting is configured                                            |
+| `ACTION_NOT_FOUND`            | 404    | engine                     | Invoked action OID not in storage                                                    |
+| `INSTANCE_NOT_FOUND`          | 404    | engine, handlers           | Instance lookup miss                                                                 |
+| `INVALID_STATE_TRANSITION`    | 409    | engine                     | `details` carries `current_state`, `command`                                         |
+| `INVALID_COMMAND`             | 422    | commands router            | `details.command` echoes the rejected value                                          |
+| `PARAMETER_VALIDATION_FAILED` | 400    | engine                     | Inputs failed action-spec validation                                                 |
+| `EXECUTION_ERROR`             | 500    | engine                     | Sidecar crash or runtime error                                                       |
+| `INTERNAL_ERROR`              | 500    | fallback in `errorHandler` | Unhandled exception                                                                  |
+| `PROPERTY_NOT_FOUND`          | 404    | properties handler         | Property name does not match any spec in scope                                       |
+| `AMBIGUOUS_PROPERTY`          | 409    | properties handler         | Name matches multiple environments; client must supply `environment_oid` query param |
+| `PROPERTY_WRITE_ERROR`        | 500    | engine / sidecar           | `set_property` rejected by sandbox (unknown spec, type mismatch)                     |
 
 ### 3.4 Identifiers and timestamps
 
@@ -178,55 +181,91 @@ interface HealthResponse {
 
 #### `GET /capabilities`
 
-Lists every action the container knows about, with the normalized parameter shape the protocol promises. The container normalizes three heterogeneous parameter-spec shapes inherited from Trajectory MD into a single canonical wire form.
+Lists all environments and the actions within each environment. Results are grouped by environment so clients can associate actions with their lifecycle state and action-level properties in one call. The container normalizes three heterogeneous parameter-spec shapes inherited from Trajectory MD into a single canonical wire form.
 
 **Response 200:**
 
 ```ts
 interface CapabilitiesResponse {
-  data: Array<{
-    action_oid: string
-    environment_oid: string
-    local_id: string
-    version: string
-    description: string | null
-    visibility: 'opaque' | 'observable'
-    input_parameters: Array<NormalizedParameterSpec>
-    output_parameters: Array<NormalizedParameterSpec>
-    supported_commands: Command[] // observable: 7 commands, opaque: ['ABORT']
-  }>
-  meta: { total: number }
+  data: {
+    environments: EnvironmentCapability[]
+  }
+  meta: {
+    total_environments: number
+    total_actions: number
+  }
 }
 
-interface NormalizedParameterSpec {
+interface EnvironmentCapability {
+  environment_oid: string
+  environment_name: string
+  environment_state: LifecycleState
+  action_properties: ActionPropertySpec[]
+  actions: ActionCapability[]
+}
+
+interface ActionPropertySpec {
   name: string
+  oid?: string
   description?: string
-  default_value?: string
-  json_schema?: string | null
+  entries: Array<{ name: string; value: string }>
 }
 
-type Command = 'PAUSE' | 'RESUME' | 'HOLD' | 'UNHOLD' | 'ABORT' | 'STOP' | 'CLEAR'
+interface ActionCapability {
+  action_oid: string
+  action_name: string
+  action_state: LifecycleState
+  visibility: 'observable' | 'opaque'
+  input_parameters: ParameterSpec[]
+  output_parameters: ParameterSpec[]
+  supported_commands: SupportedCommand[] // observable: all 7; opaque: ['ABORT'] only
+}
+
+type LifecycleState =
+  | 'Draft'
+  | 'InTest'
+  | 'InReview'
+  | 'Approved'
+  | 'Effective'
+  | 'Superseded'
+  | 'Obsolete'
+type SupportedCommand = 'PAUSE' | 'RESUME' | 'HOLD' | 'UNHOLD' | 'ABORT' | 'STOP' | 'CLEAR'
 ```
 
 ```json
 {
-  "data": [
-    {
-      "action_oid": "act-abc",
-      "environment_oid": "env-1",
-      "local_id": "PickAndPlace",
-      "version": "1.2.0",
-      "description": "Move a part from source to destination",
-      "visibility": "observable",
-      "input_parameters": [
-        { "name": "source", "description": "Source bin ID", "default_value": "A1" },
-        { "name": "destination", "default_value": "B2" }
-      ],
-      "output_parameters": [{ "name": "duration_ms" }],
-      "supported_commands": ["PAUSE", "RESUME", "HOLD", "UNHOLD", "ABORT", "STOP", "CLEAR"]
-    }
-  ],
-  "meta": { "total": 1 }
+  "data": {
+    "environments": [
+      {
+        "environment_oid": "env-1",
+        "environment_name": "Warehouse Cell A",
+        "environment_state": "Effective",
+        "action_properties": [
+          {
+            "name": "conveyor_speed",
+            "oid": "prop-cs-01",
+            "description": "Current conveyor belt speed (mm/s)",
+            "entries": [{ "name": "value", "value": "450" }]
+          }
+        ],
+        "actions": [
+          {
+            "action_oid": "act-abc",
+            "action_name": "PickAndPlace",
+            "action_state": "Effective",
+            "visibility": "observable",
+            "input_parameters": [
+              { "name": "source", "description": "Source bin ID", "default_value": "A1" },
+              { "name": "destination", "default_value": "B2" }
+            ],
+            "output_parameters": [{ "name": "duration_ms" }],
+            "supported_commands": ["PAUSE", "RESUME", "HOLD", "UNHOLD", "ABORT", "STOP", "CLEAR"]
+          }
+        ]
+      }
+    ]
+  },
+  "meta": { "total_environments": 1, "total_actions": 1 }
 }
 ```
 
@@ -418,6 +457,128 @@ Subscribe to a Server-Sent Events stream of lifecycle events for one instance. S
 
 ---
 
+### 4.5 Properties
+
+Action properties are environment-level named records mutated by action code at runtime via `set_property`. They represent shared state that persists across action instances within an environment (e.g., a sensor calibration offset updated by one action and consumed by another). Clients can enumerate current property values and subscribe to live changes without polling.
+
+#### `GET /properties`
+
+List all action properties across all environments, grouped by environment.
+
+**Response 200:**
+
+```ts
+interface PropertiesListResponse {
+  data: {
+    environments: Array<{
+      environment_oid: string
+      environment_name: string
+      properties: Array<{
+        name: string
+        oid?: string
+        description?: string
+        entries: Array<{ name: string; value: string }>
+      }>
+    }>
+  }
+  meta: { total_environments: number; total_properties: number }
+}
+```
+
+```json
+{
+  "data": {
+    "environments": [
+      {
+        "environment_oid": "env-1",
+        "environment_name": "Warehouse Cell A",
+        "properties": [
+          {
+            "name": "conveyor_speed",
+            "oid": "prop-cs-01",
+            "description": "Current conveyor belt speed (mm/s)",
+            "entries": [{ "name": "value", "value": "450" }]
+          }
+        ]
+      }
+    ]
+  },
+  "meta": { "total_environments": 1, "total_properties": 1 }
+}
+```
+
+---
+
+#### `GET /properties/:id`
+
+Read a single property by its outer name. If the same property name appears in multiple environments, the request is ambiguous and returns 409 unless the client supplies `?environment_oid=` to disambiguate.
+
+**Path:** `id` — the property name (e.g., `conveyor_speed`).
+
+**Query parameters:**
+
+| Name              | Type   | Notes                                                      |
+| ----------------- | ------ | ---------------------------------------------------------- |
+| `environment_oid` | string | Required when the name exists in more than one environment |
+
+**Response 200:**
+
+```ts
+interface PropertyResponse {
+  data: {
+    name: string
+    oid?: string
+    description?: string
+    environment_oid: string
+    environment_name: string
+    entries: Array<{ name: string; value: string }>
+  }
+  meta: Record<string, never>
+}
+```
+
+```json
+{
+  "data": {
+    "name": "conveyor_speed",
+    "oid": "prop-cs-01",
+    "description": "Current conveyor belt speed (mm/s)",
+    "environment_oid": "env-1",
+    "environment_name": "Warehouse Cell A",
+    "entries": [{ "name": "value", "value": "450" }]
+  },
+  "meta": {}
+}
+```
+
+**Errors:**
+
+- `PROPERTY_NOT_FOUND` (404) — no property with that name exists in any in-scope environment.
+- `AMBIGUOUS_PROPERTY` (409) — name matches properties in multiple environments; client must add `?environment_oid=<oid>`.
+
+---
+
+#### `GET /properties/:id/events`
+
+Subscribe to a Server-Sent Events stream of `property` events for the named property. Emits one event each time action code calls `set_property` for this property. See §5 for SSE connection and wire-format details.
+
+**Path:** `id` — the property name.
+
+**Query parameters:**
+
+| Name              | Type   | Notes                                                      |
+| ----------------- | ------ | ---------------------------------------------------------- |
+| `environment_oid` | string | Required when the name exists in more than one environment |
+
+**Response (success):** `200 OK`, `Content-Type: text/event-stream`. Body is a stream of `property` events (see §5.4).
+
+**Errors:**
+
+- `PROPERTY_NOT_FOUND` (404) — returned as JSON before headers flush.
+- `AMBIGUOUS_PROPERTY` (409) — returned as JSON before headers flush.
+
+---
+
 ## 5. SSE streaming
 
 ### 5.1 Connection
@@ -453,7 +614,7 @@ data: <JSON>
 ### 5.4 Event types
 
 ```ts
-type SseEventType = 'state_change' | 'output' | 'log' | 'heartbeat'
+type SseEventType = 'state_change' | 'output' | 'log' | 'heartbeat' | 'property'
 ```
 
 #### `state_change`
@@ -502,6 +663,36 @@ Emitted every 30 seconds while the instance is non-terminal. Stops at terminal s
 { "timestamp": "2026-05-18T14:23:31.456Z" }
 ```
 
+#### `property`
+
+Emitted on the `GET /properties/:id/events` SSE stream whenever action code calls `set_property` for the subscribed property. Not emitted on instance event streams.
+
+```ts
+interface PropertyEventData {
+  environment_oid: string
+  property_name: string
+  entries: Array<{ name: string; value: string }>
+  changed_entries: string[]
+  source: 'action_code'
+  source_action_oid?: string
+  source_instance_id?: string
+  timestamp: string
+}
+```
+
+```json
+{
+  "environment_oid": "env-1",
+  "property_name": "conveyor_speed",
+  "entries": [{ "name": "value", "value": "520" }],
+  "changed_entries": ["value"],
+  "source": "action_code",
+  "source_action_oid": "act-abc",
+  "source_instance_id": "ai-9k2x",
+  "timestamp": "2026-05-18T14:23:05.123Z"
+}
+```
+
 ### 5.5 Terminal handling
 
 When the engine reports a terminal state:
@@ -524,5 +715,8 @@ When the engine reports a terminal state:
 | DELETE | `/instances/:id`              | Cancel instance            | API key\* | 200     |
 | POST   | `/instances/:id/command`      | Send state-machine command | API key\* | 200     |
 | GET    | `/instances/:id/events`       | SSE event stream           | API key\* | 200     |
+| GET    | `/properties`                 | List all properties        | API key\* | 200     |
+| GET    | `/properties/:id`             | Read single property       | API key\* | 200     |
+| GET    | `/properties/:id/events`      | SSE stream for a property  | API key\* | 200     |
 
 \*API key required only when the `api_key` setting is configured.

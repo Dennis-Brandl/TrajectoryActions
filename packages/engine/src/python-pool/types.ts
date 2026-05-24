@@ -35,6 +35,12 @@ export interface SidecarResponse {
   stderr_capture: string
   // Error fields (present when success is false)
   error?: string
-  error_type?: 'SYNTAX_ERROR' | 'RUNTIME_ERROR' | 'TIMEOUT' | 'WORKER_CRASH'
+  error_type?:
+    | 'SYNTAX_ERROR'
+    | 'RUNTIME_ERROR'
+    | 'TIMEOUT'
+    | 'WORKER_CRASH'
+    | 'PROPERTY_WRITE_ERROR'
   traceback?: string
+  property_mutations?: Array<{ spec_name: string; entry_name: string; value: string }>
 }

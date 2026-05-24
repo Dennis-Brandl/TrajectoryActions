@@ -110,7 +110,8 @@ function createTestApp(): TestApp {
       codeVersionRepo,
       instanceRepo,
       logRepo,
-      settingsRepo
+      settingsRepo,
+      sseManager
     )
   )
   app.use(errorHandler)
@@ -150,7 +151,12 @@ function seedEnvironment(db: BetterSqlite3.Database, oid: string): string {
   return oid
 }
 
-function seedAction(db: BetterSqlite3.Database, envOid: string, actionOid: string): string {
+function seedAction(
+  db: BetterSqlite3.Database,
+  envOid: string,
+  actionOid: string,
+  visibility: 'observable' | 'opaque' = 'observable'
+): string {
   const actionRepo = new ActionRepository(db)
   if (!actionRepo.findByOid(actionOid)) {
     actionRepo.create({
@@ -159,7 +165,7 @@ function seedAction(db: BetterSqlite3.Database, envOid: string, actionOid: strin
       local_id: `Action-${actionOid}`,
       version: '1.0',
       last_modified_date: new Date().toISOString(),
-      action_visibility: 'observable',
+      action_visibility: visibility,
       input_parameter_specifications: [],
       output_parameter_specifications: [],
       property_specifications: [],
@@ -438,6 +444,105 @@ describe('POST /management/v1/code/:action_oid/:state (MGMT-09)', () => {
 
       expect(res.status).toBe(404)
       expect(res.body.error.code).toBe('NOT_FOUND')
+    } finally {
+      await manager.shutdown()
+    }
+  }, 30000)
+
+  it('rejects EXECUTING on an opaque action with 400 VALIDATION_ERROR', async () => {
+    const { app, manager, db } = createTestApp()
+    try {
+      const envOid = seedEnvironment(db, 'env-save-vis-001')
+      const actionOid = seedAction(db, envOid, 'act-save-vis-001', 'opaque')
+
+      const res = await request(app)
+        .post(`/management/v1/code/${actionOid}/EXECUTING`)
+        .send({ source_code: VALID_PYTHON })
+
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe('VALIDATION_ERROR')
+      expect(res.body.error.message).toContain('EXECUTING')
+      expect(res.body.error.message).toContain('opaque')
+      expect(res.body.error.details.action_visibility).toBe('opaque')
+      // Opaque valid states include the 4 named states plus ABORTING/STOPPING
+      // (reachable via ABORT/STOP commands per OPAQUE_TRANSITION_TABLE).
+      expect(res.body.error.details.valid_states).toEqual(
+        expect.arrayContaining(['POSTED', 'RECEIVED', 'IN_PROGRESS', 'COMPLETED', 'ABORTING'])
+      )
+      expect(res.body.error.details.valid_states).not.toContain('EXECUTING')
+    } finally {
+      await manager.shutdown()
+    }
+  }, 30000)
+
+  it('accepts ABORTING on an opaque action (reachable via ABORT command)', async () => {
+    const { app, manager, db } = createTestApp()
+    try {
+      const envOid = seedEnvironment(db, 'env-save-vis-aborting')
+      const actionOid = seedAction(db, envOid, 'act-save-vis-aborting', 'opaque')
+
+      const res = await request(app)
+        .post(`/management/v1/code/${actionOid}/ABORTING`)
+        .send({ source_code: VALID_PYTHON })
+
+      expect(res.status).toBe(201)
+    } finally {
+      await manager.shutdown()
+    }
+  }, 30000)
+
+  it('rejects POSTED on an observable action with 400 VALIDATION_ERROR', async () => {
+    const { app, manager, db } = createTestApp()
+    try {
+      const envOid = seedEnvironment(db, 'env-save-vis-002')
+      const actionOid = seedAction(db, envOid, 'act-save-vis-002', 'observable')
+
+      const res = await request(app)
+        .post(`/management/v1/code/${actionOid}/POSTED`)
+        .send({ source_code: VALID_PYTHON })
+
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe('VALIDATION_ERROR')
+      expect(res.body.error.message).toContain('POSTED')
+      expect(res.body.error.message).toContain('observable')
+    } finally {
+      await manager.shutdown()
+    }
+  }, 30000)
+
+  it('accepts IN_PROGRESS on an opaque action (201)', async () => {
+    const { app, manager, db } = createTestApp()
+    try {
+      const envOid = seedEnvironment(db, 'env-save-vis-003')
+      const actionOid = seedAction(db, envOid, 'act-save-vis-003', 'opaque')
+
+      const res = await request(app)
+        .post(`/management/v1/code/${actionOid}/IN_PROGRESS`)
+        .send({ source_code: VALID_PYTHON })
+
+      expect(res.status).toBe(201)
+      expect(res.body.data.version_number).toBe(1)
+    } finally {
+      await manager.shutdown()
+    }
+  }, 30000)
+
+  it('rejects an unknown state with 400 listing valid states', async () => {
+    const { app, manager, db } = createTestApp()
+    try {
+      const envOid = seedEnvironment(db, 'env-save-vis-004')
+      const actionOid = seedAction(db, envOid, 'act-save-vis-004', 'observable')
+
+      const res = await request(app)
+        .post(`/management/v1/code/${actionOid}/FROBNICATING`)
+        .send({ source_code: VALID_PYTHON })
+
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe('VALIDATION_ERROR')
+      expect(res.body.error.message).toContain('FROBNICATING')
+      expect(res.body.error.details.valid_states).toEqual(
+        expect.arrayContaining(['EXECUTING', 'COMPLETED'])
+      )
     } finally {
       await manager.shutdown()
     }

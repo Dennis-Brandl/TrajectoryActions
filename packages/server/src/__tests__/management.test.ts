@@ -50,6 +50,7 @@ interface TestApp {
   app: express.Express
   manager: InstanceManager
   db: BetterSqlite3.Database
+  sseManager: SseManager
   environmentRepo: EnvironmentRepository
   actionRepo: ActionRepository
   codeVersionRepo: CodeVersionRepository
@@ -106,7 +107,8 @@ function createTestApp(): TestApp {
       codeVersionRepo,
       instanceRepo,
       logRepo,
-      settingsRepo
+      settingsRepo,
+      sseManager
     )
   )
   app.use(errorHandler)
@@ -115,6 +117,7 @@ function createTestApp(): TestApp {
     app,
     manager,
     db,
+    sseManager,
     environmentRepo,
     actionRepo,
     codeVersionRepo,
@@ -945,6 +948,92 @@ describe('DELETE /management/v1/environments/:oid', () => {
       const res = await request(app).delete(`/management/v1/environments/${envOid}`)
       expect(res.status).toBe(409)
       expect(res.body.error.code).toBe('CONFLICT')
+    } finally {
+      await manager.shutdown()
+    }
+  }, 30000)
+})
+
+// ============================================================
+// 5b. Property bus teardown on environment delete (Task 2.10)
+// ============================================================
+
+describe('DELETE /management/v1/environments/:oid — property bus teardown', () => {
+  it('destroys property buses when environment is deleted', async () => {
+    const { app, manager, sseManager, db } = createTestApp()
+    try {
+      const envOid = seedEnvironment(db, { oid: 'env-bus-teardown-001' })
+
+      // Subscribe to a property bus for the env
+      const received: unknown[] = []
+      sseManager.subscribeProperty(envOid, 'SIM_MODE', (ev) => received.push(ev))
+
+      // Sanity check: publish reaches the listener before delete
+      sseManager.publishProperty(envOid, 'SIM_MODE', {
+        entries: [{ name: 'SIM_MODE', value: 'on' }],
+        changed_entries: ['SIM_MODE'],
+        source: 'action_code',
+      })
+      expect(received).toHaveLength(1)
+
+      // Delete the environment via the route
+      const res = await request(app).delete(`/management/v1/environments/${envOid}`)
+      expect(res.status).toBe(200)
+
+      // Clear the received array; re-publish must NOT fire the listener
+      received.length = 0
+      sseManager.publishProperty(envOid, 'SIM_MODE', {
+        entries: [{ name: 'SIM_MODE', value: 'off' }],
+        changed_entries: ['SIM_MODE'],
+        source: 'action_code',
+      })
+      expect(received).toHaveLength(0)
+    } finally {
+      await manager.shutdown()
+    }
+  }, 30000)
+
+  it('does NOT destroy property buses when delete returns 409 (active instances)', async () => {
+    const { app, manager, sseManager, db } = createTestApp()
+    try {
+      const envOid = seedEnvironment(db, { oid: 'env-bus-no-teardown-001' })
+      const actionOid = seedAction(db, envOid, {
+        oid: 'act-bus-no-teardown-001',
+        visibility: 'opaque',
+      })
+
+      // Subscribe before the attempted delete
+      const received: unknown[] = []
+      sseManager.subscribeProperty(envOid, 'SIM_MODE', (ev) => received.push(ev))
+
+      // Seed an active instance so the delete returns 409
+      const instanceRepo = new InstanceRepository(db)
+      instanceRepo.create({
+        runtime_action_instance_id: 'inst-bus-active-001',
+        action_oid: actionOid,
+        environment_oid: envOid,
+        workflow_instance_id: 'wf-bus-active',
+        step_instance_id: 'step-bus-active',
+        step_oid: 'step-oid-bus-active',
+        visibility: 'opaque',
+        state: 'RUNNING',
+        input_parameters: [],
+        output_parameters: [],
+        state_history: [],
+        pinned_code_versions: [],
+        states_with_code_executed: [],
+      })
+
+      const res = await request(app).delete(`/management/v1/environments/${envOid}`)
+      expect(res.status).toBe(409)
+
+      // Bus must still be alive: publish should reach the listener
+      sseManager.publishProperty(envOid, 'SIM_MODE', {
+        entries: [{ name: 'SIM_MODE', value: 'on' }],
+        changed_entries: ['SIM_MODE'],
+        source: 'action_code',
+      })
+      expect(received).toHaveLength(1)
     } finally {
       await manager.shutdown()
     }

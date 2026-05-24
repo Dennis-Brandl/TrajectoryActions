@@ -1,5 +1,5 @@
 import type BetterSqlite3 from 'better-sqlite3'
-import type { Environment, EnvironmentInput, EnvironmentRow } from '../types.js'
+import type { Environment, EnvironmentInput, EnvironmentRow, LifecycleState } from '../types.js'
 
 export class EnvironmentRepository {
   private readonly db: BetterSqlite3.Database
@@ -20,12 +20,12 @@ export class EnvironmentRepository {
         oid, local_id, version, last_modified_date, description,
         schema_version, action_property_specifications,
         value_property_specifications, resource_property_specifications,
-        imported_at, source_filename
+        imported_at, source_filename, state
       ) VALUES (
         @oid, @local_id, @version, @last_modified_date, @description,
         @schema_version, @action_property_specifications,
         @value_property_specifications, @resource_property_specifications,
-        @imported_at, @source_filename
+        @imported_at, @source_filename, @state
       )
     `)
 
@@ -65,6 +65,7 @@ export class EnvironmentRepository {
       resource_property_specifications: JSON.stringify(input.resource_property_specifications),
       imported_at: new Date().toISOString(),
       source_filename: input.source_filename,
+      state: input.state ?? 'Draft',
     }
   }
 
@@ -83,6 +84,7 @@ export class EnvironmentRepository {
       ) as unknown[],
       imported_at: row.imported_at,
       source_filename: row.source_filename,
+      state: row.state as LifecycleState,
     }
   }
 
@@ -146,6 +148,10 @@ export class EnvironmentRepository {
       source_filename: () => {
         fields.push('source_filename = ?')
         values.push(input.source_filename)
+      },
+      state: () => {
+        fields.push('state = ?')
+        values.push(input.state)
       },
     }
 

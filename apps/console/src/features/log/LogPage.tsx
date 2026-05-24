@@ -101,9 +101,9 @@ function ExpandedDetail({ entry }: { entry: LogEntry }) {
           </p>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
             {entry.input_parameters.map((p) => (
-              <div key={p.name} className="flex gap-2">
+              <div key={p.key} className="flex gap-2">
                 <span className="font-mono text-xs text-muted-foreground w-32 shrink-0 truncate">
-                  {p.name}:
+                  {p.key}:
                 </span>
                 <span className="font-mono text-xs truncate">{p.value}</span>
               </div>
@@ -120,9 +120,9 @@ function ExpandedDetail({ entry }: { entry: LogEntry }) {
           </p>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
             {entry.output_parameters.map((p) => (
-              <div key={p.name} className="flex gap-2">
+              <div key={p.key} className="flex gap-2">
                 <span className="font-mono text-xs text-muted-foreground w-32 shrink-0 truncate">
-                  {p.name}:
+                  {p.key}:
                 </span>
                 <span className="font-mono text-xs truncate">{p.value}</span>
               </div>

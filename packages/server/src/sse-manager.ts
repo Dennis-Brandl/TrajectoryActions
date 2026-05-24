@@ -6,7 +6,7 @@ import type { Instance } from '@trajectory/storage'
 
 export interface SseEvent {
   id: number
-  type: 'state_change' | 'output' | 'log' | 'heartbeat'
+  type: 'state_change' | 'output' | 'log' | 'heartbeat' | 'property'
   data: Record<string, unknown>
 }
 
@@ -177,6 +177,102 @@ export class SseManager {
   }
 
   // --------------------------------------------------------
+  // Property buses (per env_oid + property_name)
+  // --------------------------------------------------------
+
+  private readonly propertyBuses = new Map<
+    string,
+    {
+      buffer: SseEvent[]
+      nextId: number
+      listeners: Set<(event: SseEvent) => void>
+      heartbeatTimer: NodeJS.Timeout
+    }
+  >()
+
+  private propertyKey(envOid: string, propertyName: string): string {
+    return `${envOid}::${propertyName}`
+  }
+
+  private getOrCreatePropertyBus(envOid: string, propertyName: string) {
+    const key = this.propertyKey(envOid, propertyName)
+    const existing = this.propertyBuses.get(key)
+    if (existing) return existing
+    const bus = {
+      buffer: [] as SseEvent[],
+      nextId: 0,
+      listeners: new Set<(event: SseEvent) => void>(),
+      heartbeatTimer: setInterval(() => {
+        const ev: SseEvent = {
+          id: bus.nextId++,
+          type: 'heartbeat',
+          data: { timestamp: new Date().toISOString() },
+        }
+        bus.buffer.push(ev)
+        if (bus.buffer.length > BUFFER_SIZE) bus.buffer.shift()
+        for (const l of bus.listeners) l(ev)
+      }, HEARTBEAT_MS),
+    }
+    this.propertyBuses.set(key, bus)
+    return bus
+  }
+
+  publishProperty(
+    envOid: string,
+    propertyName: string,
+    data: {
+      entries: Array<{ name: string; value: string }>
+      changed_entries: string[]
+      source: 'action_code'
+      source_action_oid?: string
+      source_instance_id?: string
+    }
+  ): void {
+    const bus = this.getOrCreatePropertyBus(envOid, propertyName)
+    const event: SseEvent = {
+      id: bus.nextId++,
+      type: 'property',
+      data: {
+        environment_oid: envOid,
+        property_name: propertyName,
+        ...data,
+        timestamp: new Date().toISOString(),
+      },
+    }
+    bus.buffer.push(event)
+    if (bus.buffer.length > BUFFER_SIZE) bus.buffer.shift()
+    for (const l of bus.listeners) l(event)
+  }
+
+  subscribeProperty(
+    envOid: string,
+    propertyName: string,
+    listener: (event: SseEvent) => void
+  ): () => void {
+    const bus = this.getOrCreatePropertyBus(envOid, propertyName)
+    bus.listeners.add(listener)
+    return () => {
+      bus.listeners.delete(listener)
+    }
+  }
+
+  getPropertyEventsSince(envOid: string, propertyName: string, afterId: number): SseEvent[] {
+    const bus = this.propertyBuses.get(this.propertyKey(envOid, propertyName))
+    if (!bus) return []
+    return bus.buffer.filter((e) => e.id > afterId)
+  }
+
+  destroyPropertyBuses(envOid: string): void {
+    for (const [key, bus] of this.propertyBuses) {
+      if (key.startsWith(`${envOid}::`)) {
+        clearInterval(bus.heartbeatTimer)
+        bus.listeners.clear()
+        this.propertyBuses.delete(key)
+      }
+    }
+  }
+
+  // --------------------------------------------------------
   // Public: shutdown
   // --------------------------------------------------------
 
@@ -191,5 +287,9 @@ export class SseManager {
       }
     }
     this.buses.clear()
+    for (const bus of this.propertyBuses.values()) {
+      clearInterval(bus.heartbeatTimer)
+    }
+    this.propertyBuses.clear()
   }
 }

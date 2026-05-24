@@ -3,6 +3,8 @@ import type BetterSqlite3 from 'better-sqlite3'
 import { openDatabase } from '../database.js'
 import { runMigrations } from '../migrations/runner.js'
 import { migration as initialMigration } from '../migrations/001-initial-schema.js'
+import { migration as actionTimeoutMigration } from '../migrations/002-action-timeout.js'
+import { migration as lifecycleStateMigration } from '../migrations/003-lifecycle-state.js'
 import { EnvironmentRepository } from '../repositories/environment.repository.js'
 import type { EnvironmentInput } from '../types.js'
 
@@ -28,7 +30,7 @@ describe('EnvironmentRepository', () => {
 
   beforeEach(() => {
     db = openDatabase(':memory:')
-    runMigrations(db, [initialMigration])
+    runMigrations(db, [initialMigration, actionTimeoutMigration, lifecycleStateMigration])
     repo = new EnvironmentRepository(db)
   })
 
@@ -84,6 +86,26 @@ describe('EnvironmentRepository', () => {
       expect(env.action_property_specifications).toEqual([])
       expect(env.value_property_specifications).toEqual([])
       expect(env.resource_property_specifications).toEqual([])
+    })
+  })
+
+  describe('lifecycle state', () => {
+    it('persists and returns the lifecycle state', () => {
+      repo.create(makeEnvInput({ oid: 'env-state-1', local_id: 'StateEnv1', state: 'Approved' }))
+      const env = repo.findByOid('env-state-1')!
+      expect(env.state).toBe('Approved')
+    })
+
+    it('defaults state to Draft when not provided', () => {
+      repo.create(makeEnvInput({ oid: 'env-state-2', local_id: 'StateEnv2' }))
+      const env = repo.findByOid('env-state-2')!
+      expect(env.state).toBe('Draft')
+    })
+
+    it('updates lifecycle state via update()', () => {
+      repo.create(makeEnvInput({ oid: 'env-state-3', local_id: 'StateEnv3', state: 'InTest' }))
+      const updated = repo.update('env-state-3', { state: 'Effective' })
+      expect(updated!.state).toBe('Effective')
     })
   })
 

@@ -14,6 +14,7 @@ export class InstanceRepository {
   private readonly stmtFindByWorkflow: BetterSqlite3.Statement
   private readonly stmtMarkLogged: BetterSqlite3.Statement
   private readonly stmtDeleteByEnvironment: BetterSqlite3.Statement
+  private readonly stmtDeleteByAction: BetterSqlite3.Statement
   private readonly stmtCount: BetterSqlite3.Statement
   private readonly stmtCountActive: BetterSqlite3.Statement
 
@@ -65,6 +66,10 @@ export class InstanceRepository {
 
     this.stmtDeleteByEnvironment = db.prepare(`
       DELETE FROM instances WHERE environment_oid = ?
+    `)
+
+    this.stmtDeleteByAction = db.prepare(`
+      DELETE FROM instances WHERE action_oid = ?
     `)
 
     this.stmtCount = db.prepare(`
@@ -234,6 +239,11 @@ export class InstanceRepository {
 
   deleteByEnvironment(environmentOid: string): number {
     const result = this.stmtDeleteByEnvironment.run(environmentOid)
+    return result.changes
+  }
+
+  deleteByAction(actionOid: string): number {
+    const result = this.stmtDeleteByAction.run(actionOid)
     return result.changes
   }
 

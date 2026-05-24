@@ -95,12 +95,20 @@ async function startTestServer(): Promise<TestApp> {
       codeVersionRepo,
       instanceRepo,
       logRepo,
-      settingsRepo
+      settingsRepo,
+      sseManager
     )
   )
   app.use(
     '/trajectory/v1',
-    createProtocolRouter(manager, actionRepo, instanceRepo, settingsRepo, sseManager)
+    createProtocolRouter(
+      manager,
+      actionRepo,
+      instanceRepo,
+      settingsRepo,
+      sseManager,
+      environmentRepo
+    )
   )
   app.use(errorHandler)
 

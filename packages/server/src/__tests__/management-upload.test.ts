@@ -20,6 +20,7 @@ import {
 } from '@trajectory/storage'
 import type BetterSqlite3 from 'better-sqlite3'
 import { InstanceManager } from '@trajectory/engine'
+import { SseManager } from '../sse-manager.js'
 import { createManagementRouter } from '../routes/management.js'
 import { errorHandler } from '../middleware/error-handler.js'
 
@@ -44,6 +45,7 @@ function createTestApp(): TestApp {
   const instanceRepo = new InstanceRepository(db)
   const logRepo = new LogRepository(db)
   const settingsRepo = new SettingsRepository(db)
+  const sseManager = new SseManager()
   const manager = new InstanceManager(db, {
     scriptPath: SCRIPT_PATH,
     poolSize: 1,
@@ -66,7 +68,8 @@ function createTestApp(): TestApp {
       codeVersionRepo,
       instanceRepo,
       logRepo,
-      settingsRepo
+      settingsRepo,
+      sseManager
     )
   )
   app.use(errorHandler)

@@ -4,6 +4,14 @@
 
 export type Visibility = 'opaque' | 'observable'
 export type FinalStatus = 'COMPLETED' | 'ABORTED' | 'STOPPED'
+export type LifecycleState =
+  | 'Draft'
+  | 'InTest'
+  | 'InReview'
+  | 'Approved'
+  | 'Effective'
+  | 'Superseded'
+  | 'Obsolete'
 
 // ============================================================
 // Row types — raw SQLite shapes (JSON fields as string,
@@ -22,6 +30,7 @@ export interface EnvironmentRow {
   resource_property_specifications: string
   imported_at: string
   source_filename: string
+  state: string
 }
 
 export interface ActionRow {
@@ -36,6 +45,7 @@ export interface ActionRow {
   output_parameter_specifications: string
   property_specifications: string
   timeout_seconds: number | null
+  state: string
 }
 
 export interface CodeVersionRow {
@@ -117,6 +127,7 @@ export interface Environment {
   resource_property_specifications: unknown[]
   imported_at: string
   source_filename: string
+  state: LifecycleState
 }
 
 export interface Action {
@@ -131,6 +142,7 @@ export interface Action {
   output_parameter_specifications: unknown[]
   property_specifications: unknown[]
   timeout_seconds: number | null // NULL = global default, 0 = disabled, >0 = custom seconds
+  state: LifecycleState
 }
 
 export interface CodeVersion {
@@ -212,6 +224,7 @@ export interface EnvironmentInput {
   value_property_specifications: unknown[]
   resource_property_specifications: unknown[]
   source_filename: string
+  state?: LifecycleState
 }
 
 /** All fields required except description */
@@ -227,6 +240,7 @@ export interface ActionInput {
   output_parameter_specifications: unknown[]
   property_specifications: unknown[]
   timeout_seconds?: number | null
+  state?: LifecycleState
 }
 
 /** Omit id (auto UUID), version_number (auto-increment), is_active (default false), created_at (auto-set) */

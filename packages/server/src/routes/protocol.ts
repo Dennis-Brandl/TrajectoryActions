@@ -2,11 +2,13 @@ import { Router } from 'express'
 import type { InstanceManager } from '@trajectory/engine'
 import type {
   ActionRepository,
+  EnvironmentRepository,
   InstanceRepository,
   SettingsRepository,
   Instance,
 } from '@trajectory/storage'
 import type { SseManager } from '../sse-manager.js'
+import { formatSseEvent } from '../sse-utils.js'
 import { validateBody } from '../validation.js'
 
 // ============================================================
@@ -91,24 +93,27 @@ function formatInstanceResponse(instance: Instance) {
 /**
  * createProtocolRouter — Express Router with all /trajectory/v1/ endpoints.
  *
- * Endpoints (plan 05-01):
+ * Endpoints:
  *   GET  /health                       — REST-01
  *   GET  /capabilities                 — REST-02
  *   POST /actions/:action_oid/invoke   — REST-03
  *   GET  /instances/:id                — REST-04
  *   GET  /instances                    — REST-08
  *   DELETE /instances/:id              — REST-09
+ *   GET  /properties                   — REST-10
+ *   GET  /properties/:id               — REST-11
+ *   GET  /properties/:id/events        — REST-12 (SSE stream)
  */
 export function createProtocolRouter(
   manager: InstanceManager,
   actionRepo: ActionRepository,
   instanceRepo: InstanceRepository,
   _settingsRepo: SettingsRepository,
-  _sseManager: SseManager
+  sseManager: SseManager,
+  environmentRepo: EnvironmentRepository
 ): Router {
-  // _settingsRepo and _sseManager reserved for plan 05-02 (SSE streaming, expose_traceback)
+  // _settingsRepo reserved for plan 05-02 (expose_traceback)
   void _settingsRepo
-  void _sseManager
 
   const router = Router()
 
@@ -130,30 +135,51 @@ export function createProtocolRouter(
   // REST-02: GET /capabilities
   // --------------------------------------------------------
   router.get('/capabilities', (_req, res) => {
-    const actions = actionRepo.findAll()
+    const envs = environmentRepo.findAll()
+    const allActions = actionRepo.findAll()
 
-    const data = actions.map((action) => ({
-      action_oid: action.oid,
-      environment_oid: action.environment_oid,
-      local_id: action.local_id,
-      version: action.version,
-      description: action.description,
-      visibility: action.action_visibility,
-      input_parameters: (action.input_parameter_specifications as unknown[]).map(
-        normalizeParameterSpec
-      ),
-      output_parameters: (action.output_parameter_specifications as unknown[]).map(
-        normalizeParameterSpec
-      ),
-      supported_commands:
-        action.action_visibility === 'observable'
-          ? ['PAUSE', 'RESUME', 'HOLD', 'UNHOLD', 'ABORT', 'STOP', 'CLEAR']
-          : ['ABORT'],
-    }))
+    const data = envs.map((env) => {
+      const actions = allActions.filter((a) => a.environment_oid === env.oid)
+      return {
+        environment_oid: env.oid,
+        environment_name: env.local_id,
+        environment_state: env.state ?? 'Draft',
+        action_properties: (
+          env.action_property_specifications as Array<Record<string, unknown>>
+        ).map((p) => ({
+          name: p.name,
+          oid: p.oid,
+          description: p.description,
+          entries: (p.entries as unknown[]) ?? [],
+        })),
+        actions: actions.map((action) => ({
+          action_oid: action.oid,
+          action_name: action.local_id,
+          action_state: action.state ?? 'Draft',
+          local_id: action.local_id,
+          version: action.version,
+          description: action.description,
+          visibility: action.action_visibility,
+          input_parameters: (action.input_parameter_specifications as unknown[]).map(
+            normalizeParameterSpec
+          ),
+          output_parameters: (action.output_parameter_specifications as unknown[]).map(
+            normalizeParameterSpec
+          ),
+          supported_commands:
+            action.action_visibility === 'observable'
+              ? ['PAUSE', 'RESUME', 'HOLD', 'UNHOLD', 'ABORT', 'STOP', 'CLEAR']
+              : ['ABORT'],
+        })),
+      }
+    })
 
     res.status(200).json({
-      data,
-      meta: { total: data.length },
+      data: { environments: data },
+      meta: {
+        total_environments: data.length,
+        total_actions: data.reduce((n, e) => n + e.actions.length, 0),
+      },
     })
   })
 
@@ -269,6 +295,153 @@ export function createProtocolRouter(
     } catch (err) {
       next(err)
     }
+  })
+
+  // --------------------------------------------------------
+  // REST-10: GET /properties — list property specs across all envs
+  // --------------------------------------------------------
+  router.get('/properties', (_req, res) => {
+    const envs = environmentRepo.findAll()
+    const data = envs.map((env) => ({
+      environment_oid: env.oid,
+      environment_name: env.local_id,
+      properties: (env.action_property_specifications as Array<Record<string, unknown>>).map(
+        (p) => ({
+          name: p.name,
+          oid: p.oid,
+          description: p.description,
+          entries: (p.entries as unknown[]) ?? [],
+        })
+      ),
+    }))
+    res.status(200).json({
+      data: { environments: data },
+      meta: {
+        total_environments: data.length,
+        total_properties: data.reduce((n, e) => n + e.properties.length, 0),
+      },
+    })
+  })
+
+  // --------------------------------------------------------
+  // REST-11: GET /properties/:id — single property by outer name
+  // --------------------------------------------------------
+  router.get('/properties/:id', (req, res) => {
+    const propertyName = req.params.id
+    const envOidFilter = (req.query.environment_oid as string | undefined) ?? undefined
+    const envs = environmentRepo.findAll()
+    const matches: Array<{
+      env: (typeof envs)[number]
+      spec: Record<string, unknown>
+    }> = []
+    for (const env of envs) {
+      if (envOidFilter && env.oid !== envOidFilter) continue
+      const spec = (env.action_property_specifications as Array<Record<string, unknown>>).find(
+        (p) => p.name === propertyName
+      )
+      if (spec) matches.push({ env, spec })
+    }
+    if (matches.length === 0) {
+      res.status(404).json({
+        error: {
+          code: 'PROPERTY_NOT_FOUND',
+          message: `Property '${propertyName}' not found`,
+          details: {},
+        },
+      })
+      return
+    }
+    if (matches.length > 1) {
+      res.status(409).json({
+        error: {
+          code: 'AMBIGUOUS_PROPERTY',
+          message: `Property '${propertyName}' found in ${matches.length} environments`,
+          details: { environment_oids: matches.map((m) => m.env.oid) },
+        },
+      })
+      return
+    }
+    const { env, spec } = matches[0]
+    res.status(200).json({
+      data: {
+        environment_oid: env.oid,
+        environment_name: env.local_id,
+        name: spec.name,
+        oid: spec.oid,
+        description: spec.description,
+        entries: (spec.entries as unknown[]) ?? [],
+      },
+      meta: {},
+    })
+  })
+
+  // --------------------------------------------------------
+  // REST-12: GET /properties/:id/events (SSE)
+  // --------------------------------------------------------
+  router.get('/properties/:id/events', (req, res) => {
+    const propertyName = req.params.id
+    const envOidFilter = (req.query.environment_oid as string | undefined) ?? undefined
+
+    // Resolve target env
+    const envs = environmentRepo.findAll()
+    const matches: Array<(typeof envs)[number]> = []
+    for (const env of envs) {
+      if (envOidFilter && env.oid !== envOidFilter) continue
+      const spec = (env.action_property_specifications as Array<Record<string, unknown>>).find(
+        (p) => p.name === propertyName
+      )
+      if (spec) matches.push(env)
+    }
+    if (matches.length === 0) {
+      res.status(404).json({
+        error: {
+          code: 'PROPERTY_NOT_FOUND',
+          message: `Property '${propertyName}' not found`,
+          details: {},
+        },
+      })
+      return
+    }
+    if (matches.length > 1) {
+      res.status(409).json({
+        error: {
+          code: 'AMBIGUOUS_PROPERTY',
+          message: `Property '${propertyName}' found in ${matches.length} environments`,
+          details: { environment_oids: matches.map((e) => e.oid) },
+        },
+      })
+      return
+    }
+    const env = matches[0]
+
+    // Set SSE headers and flush immediately
+    res.set({
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+    res.flushHeaders()
+
+    // Replay buffered events if Last-Event-ID present
+    const lastEventIdHeader = req.headers['last-event-id']
+    const lastEventId = lastEventIdHeader ? Number(lastEventIdHeader) : -1
+    if (!Number.isNaN(lastEventId) && lastEventId >= 0) {
+      for (const ev of sseManager.getPropertyEventsSince(env.oid, propertyName, lastEventId)) {
+        if (!res.writableEnded) {
+          res.write(formatSseEvent(ev))
+        }
+      }
+    }
+
+    // Subscribe live
+    const unsub = sseManager.subscribeProperty(env.oid, propertyName, (ev) => {
+      if (!res.writableEnded) {
+        res.write(formatSseEvent(ev))
+      }
+    })
+
+    req.on('close', unsub)
   })
 
   // --------------------------------------------------------
