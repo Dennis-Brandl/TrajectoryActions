@@ -296,7 +296,7 @@ export interface PinnedCodeVersion {
 }
 
 export interface InstanceParameter {
-  name: string
+  key: string
   value: string
 }
 

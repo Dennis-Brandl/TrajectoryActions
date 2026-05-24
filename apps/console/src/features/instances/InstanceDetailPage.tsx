@@ -125,8 +125,8 @@ function ParametersTable({ params }: { params: Array<{ name: string; value: stri
       </TableHeader>
       <TableBody>
         {params.map((p) => (
-          <TableRow key={p.name}>
-            <TableCell className="font-mono text-xs text-muted-foreground">{p.name}</TableCell>
+          <TableRow key={p.key}>
+            <TableCell className="font-mono text-xs text-muted-foreground">{p.key}</TableCell>
             <TableCell className="font-mono text-xs">{p.value}</TableCell>
           </TableRow>
         ))}
