@@ -158,9 +158,12 @@ export class StateMachine {
     // validateCommand throws InvalidStateTransitionError if invalid
     const targetState = validateCommand(instance.state, command, instance.visibility)
 
-    // Deferred command check: if code is executing, defer HOLD/STOP/ABORT
+    // Deferred command check: if code is executing, defer HOLD/STOP/ABORT/CLEAR.
+    // CLEAR is defer-eligible because the only state it's valid from (ABORTED)
+    // can now have a finalizer; without deferral, CLEAR would race with the
+    // finalizer's terminal cleanup.
     if (
-      (command === 'HOLD' || command === 'STOP' || command === 'ABORT') &&
+      (command === 'HOLD' || command === 'STOP' || command === 'ABORT' || command === 'CLEAR') &&
       this.executingInstances.has(instanceId)
     ) {
       this.deferredCommands.set(instanceId, command)
@@ -227,10 +230,36 @@ export class StateMachine {
     const currentState = instance.state
     const visibility = instance.visibility
 
-    // Terminal state handling: emit onTerminal and stop
+    // Terminal state handling: run any pinned finalizer code, then emit onTerminal.
+    // completed_at acts as the idempotency guard — a second entry to a terminal
+    // state skips the finalizer (it already ran).
     if (isTerminal(currentState)) {
-      // Set completed_at if not already set (for states that don't pass it in updates)
       if (!instance.completed_at) {
+        // Look up pinned code for the terminal state. Both COMPLETED and ABORTED
+        // can carry a finalizer that mirrors the "Check STATE" pattern used by
+        // non-terminal states — this is what lets actions set final outputs
+        // (e.g. ExportImportAction1 setting received_count/status in COMPLETED).
+        const pinnedCodeVersions = instance.pinned_code_versions as Array<{
+          state: string
+          code_version_id: string
+        }>
+        const pinnedEntry = pinnedCodeVersions.find((entry) => entry.state === currentState)
+        const finalizerCode = pinnedEntry
+          ? this.codeVersionRepo.findById(pinnedEntry.code_version_id)
+          : null
+
+        if (finalizerCode) {
+          await this.runFinalizerCode(instanceId, currentState, finalizerCode.source_code, instance)
+          // A deferred command flushed during the finalizer (e.g. CLEAR while
+          // ABORTED finalizer ran) transitions out of the terminal state. The
+          // new state's processCurrentState will handle its own terminal
+          // cleanup — don't fire onTerminal here.
+          const afterFinalizer = this.instanceRepo.findById(instanceId)!
+          if (afterFinalizer.state !== currentState) {
+            return
+          }
+        }
+
         this.instanceRepo.updateState(instanceId, currentState, {
           completed_at: new Date().toISOString(),
         })
@@ -450,6 +479,126 @@ export class StateMachine {
 
       // Non-recovery state failure: transition to ABORTING (then ABORTING -> ABORTED via auto-advance)
       await this.enterState(instanceId, 'ABORTING', { error: errorSummary })
+    }
+  }
+
+  /**
+   * Run pinned code in a terminal state as a finalizer. Mirrors executeCode's
+   * setup but does NOT transition state on failure — per the Trajectory state
+   * model, reaching a terminal state is not retroactively an error. Persists
+   * outputs and property_mutations on both success and failure paths. A
+   * deferred command flushed during finalizer execution (only CLEAR from
+   * ABORTED is reachable today) is applied after the persist step.
+   */
+  private async runFinalizerCode(
+    instanceId: string,
+    state: string,
+    sourceCode: string,
+    instance: Instance
+  ): Promise<void> {
+    let timeoutMs: number
+    if (this.actionRepo) {
+      const action = this.actionRepo.findByOid(instance.action_oid)
+      if (action && action.timeout_seconds !== null && action.timeout_seconds !== undefined) {
+        timeoutMs = action.timeout_seconds === 0 ? 0 : action.timeout_seconds * 1000
+      } else {
+        timeoutMs = this.settingsRepo.getNumericValue('execution_timeout_ms') ?? 60000
+      }
+    } else {
+      timeoutMs = this.settingsRepo.getNumericValue('execution_timeout_ms') ?? 60000
+    }
+
+    const inputs = this.parseParametersAsRecord(instance.input_parameters)
+    const outputs = this.parseParametersAsRecord(instance.output_parameters)
+
+    let envProps: Record<string, unknown> = {}
+    let actionProps: Record<string, unknown> = {}
+    if (this.actionRepo && this.environmentRepo) {
+      const action = this.actionRepo.findByOid(instance.action_oid)
+      if (action) {
+        actionProps = flattenProperties(action.property_specifications)
+        const environment = this.environmentRepo.findByOid(action.environment_oid)
+        if (environment) {
+          envProps = flattenProperties(environment.action_property_specifications)
+        }
+      }
+    }
+
+    const overrides = this.getActionPropertyOverrides?.(instanceId)
+    if (overrides && Object.keys(overrides).length > 0) {
+      envProps = mergePropertyOverrides(
+        envProps as Record<string, Record<string, string>>,
+        overrides
+      )
+    }
+
+    this.executingInstances.add(instanceId)
+    let result: CodeExecutionResult
+    try {
+      result = await this.codeExecutor(
+        instanceId,
+        state,
+        sourceCode,
+        inputs,
+        outputs,
+        envProps,
+        actionProps,
+        timeoutMs
+      )
+    } finally {
+      this.executingInstances.delete(instanceId)
+    }
+
+    // Persist outputs from the finalizer on both success and failure paths —
+    // partial writes before a raise are valuable for debugging.
+    if (Object.keys(result.outputs).length > 0) {
+      const currentInstance = this.instanceRepo.findById(instanceId)
+      if (currentInstance) {
+        const currentOutputs = this.parseParametersAsRecord(currentInstance.output_parameters)
+        const mergedOutputs = { ...currentOutputs, ...result.outputs }
+        this.instanceRepo.updateOutputParameters(
+          instanceId,
+          Object.entries(mergedOutputs).map(([k, v]) => ({ key: k, value: v }))
+        )
+      }
+    }
+
+    if (
+      this.callbacks?.onPropertyMutations &&
+      result.property_mutations &&
+      result.property_mutations.length > 0
+    ) {
+      this.callbacks.onPropertyMutations(
+        instanceId,
+        instance.environment_oid,
+        instance.action_oid,
+        result.property_mutations
+      )
+    }
+
+    if (result.success) {
+      const updatedInstance = this.instanceRepo.findById(instanceId)
+      if (updatedInstance) {
+        const statesExecuted = updatedInstance.states_with_code_executed as string[]
+        if (!statesExecuted.includes(state)) {
+          this.instanceRepo.markStatesWithCodeExecuted(instanceId, [...statesExecuted, state])
+        }
+      }
+    } else {
+      const errorSummary = result.error_type
+        ? `${result.error_type}: ${result.error ?? 'Execution failed'}`
+        : (result.error ?? 'Execution failed')
+      this.instanceRepo.updateState(instanceId, state, {
+        error: errorSummary,
+        traceback: result.traceback ?? null,
+      })
+    }
+
+    // Flush any command deferred during finalizer execution.
+    if (this.deferredCommands.has(instanceId)) {
+      const deferredCommand = this.deferredCommands.get(instanceId)!
+      this.deferredCommands.delete(instanceId)
+      await this.sendCommand(instanceId, deferredCommand)
     }
   }
 

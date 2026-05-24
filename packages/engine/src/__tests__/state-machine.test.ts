@@ -725,3 +725,156 @@ describe('StateMachine - Callbacks', () => {
     expect(state).toBe('ABORTED')
   })
 })
+
+// ============================================================
+// Terminal-state finalizer tests
+// ============================================================
+
+describe('StateMachine - Terminal-state finalizer', () => {
+  it('opaque: runs pinned code at COMPLETED and persists outputs (ExportImportAction1 scenario)', async () => {
+    const deps = createTestDeps()
+    const { instanceId } = createTestInstance(deps, {
+      visibility: 'opaque',
+      pinnedStates: ['COMPLETED'],
+    })
+    deps.codeExecutor.mockResolvedValue(
+      makeSuccessResult({ outputs: { received_count: '22', status: '0' } })
+    )
+    const sm = createSM(deps)
+
+    await sm.startInstance(instanceId)
+
+    const instance = deps.instanceRepo.findById(instanceId)!
+    expect(instance.state).toBe('COMPLETED')
+    expect(instance.completed_at).not.toBeNull()
+    expect(instance.output_parameters).toEqual(
+      expect.arrayContaining([
+        { key: 'received_count', value: '22' },
+        { key: 'status', value: '0' },
+      ])
+    )
+
+    const completedCalls = deps.codeExecutor.mock.calls.filter(
+      (c) => (c as unknown[])[1] === 'COMPLETED'
+    )
+    expect(completedCalls).toHaveLength(1)
+  })
+
+  it('observable: runs pinned code at COMPLETED and persists outputs', async () => {
+    const deps = createTestDeps()
+    const { instanceId } = createTestInstance(deps, {
+      visibility: 'observable',
+      pinnedStates: ['COMPLETED'],
+    })
+    deps.codeExecutor.mockResolvedValue(makeSuccessResult({ outputs: { result: 'ok' } }))
+    const sm = createSM(deps)
+
+    await sm.startInstance(instanceId)
+
+    const instance = deps.instanceRepo.findById(instanceId)!
+    expect(instance.state).toBe('COMPLETED')
+    expect(instance.output_parameters).toEqual([{ key: 'result', value: 'ok' }])
+  })
+
+  it('runs pinned code at ABORTED and persists outputs', async () => {
+    const deps = createTestDeps()
+    const { instanceId } = createTestInstance(deps, {
+      visibility: 'observable',
+      initialState: 'ABORTED',
+      pinnedStates: ['ABORTED'],
+    })
+    deps.codeExecutor.mockResolvedValue(makeSuccessResult({ outputs: { cleanup: 'done' } }))
+    const sm = createSM(deps)
+
+    await sm.startInstance(instanceId)
+
+    const instance = deps.instanceRepo.findById(instanceId)!
+    expect(instance.state).toBe('ABORTED')
+    expect(instance.output_parameters).toEqual([{ key: 'cleanup', value: 'done' }])
+  })
+
+  it('finalizer failure keeps terminal state and records error+traceback', async () => {
+    const deps = createTestDeps()
+    const { instanceId } = createTestInstance(deps, {
+      visibility: 'observable',
+      pinnedStates: ['COMPLETED'],
+    })
+    deps.codeExecutor.mockResolvedValue(
+      makeFailureResult({
+        error: 'oops',
+        error_type: 'RUNTIME_ERROR',
+        traceback: 'Traceback (most recent call last)\nRuntimeError: oops',
+        outputs: { partial: 'value' },
+      })
+    )
+    const sm = createSM(deps)
+
+    await sm.startInstance(instanceId)
+
+    const instance = deps.instanceRepo.findById(instanceId)!
+    // Reaching COMPLETED is not retroactively an error — state must stay COMPLETED.
+    expect(instance.state).toBe('COMPLETED')
+    expect(instance.error).toBe('RUNTIME_ERROR: oops')
+    expect(instance.traceback).toBe('Traceback (most recent call last)\nRuntimeError: oops')
+    // Partial outputs written before the raise are preserved.
+    expect(instance.output_parameters).toEqual([{ key: 'partial', value: 'value' }])
+    expect(instance.completed_at).not.toBeNull()
+  })
+
+  it('fires onTerminal exactly once after finalizer with outputs visible', async () => {
+    const deps = createTestDeps()
+    const { instanceId } = createTestInstance(deps, {
+      visibility: 'opaque',
+      pinnedStates: ['COMPLETED'],
+    })
+    deps.codeExecutor.mockResolvedValue(makeSuccessResult({ outputs: { x: '1' } }))
+
+    const onTerminal = vi.fn()
+    const sm = createSMWithCallbacks(deps, { onTerminal })
+
+    await sm.startInstance(instanceId)
+
+    expect(onTerminal).toHaveBeenCalledTimes(1)
+    const [, state, finalInstance] = onTerminal.mock.calls[0] as [string, string, Instance]
+    expect(state).toBe('COMPLETED')
+    // onTerminal must see the instance with the finalizer's outputs already
+    // persisted — that's what makes ExecutionLogger and SSE see them.
+    expect(finalInstance.output_parameters).toEqual([{ key: 'x', value: '1' }])
+  })
+
+  it('invokes onPropertyMutations from finalizer code', async () => {
+    const deps = createTestDeps()
+    const { instanceId, envOid, actionOid } = createTestInstance(deps, {
+      visibility: 'observable',
+      pinnedStates: ['COMPLETED'],
+    })
+    const mutations = [{ spec_name: 'ActionProperty1', entry_name: 'Value', value: 'final' }]
+    deps.codeExecutor.mockResolvedValue(makeSuccessResult({ property_mutations: mutations }))
+
+    const onPropertyMutations = vi.fn()
+    const sm = createSMWithCallbacks(deps, { onPropertyMutations })
+
+    await sm.startInstance(instanceId)
+
+    expect(onPropertyMutations).toHaveBeenCalledTimes(1)
+    expect(onPropertyMutations).toHaveBeenCalledWith(instanceId, envOid, actionOid, mutations)
+  })
+
+  it('does not re-run finalizer when reentering terminal state with completed_at set', async () => {
+    const deps = createTestDeps()
+    const { instanceId } = createTestInstance(deps, {
+      visibility: 'opaque',
+      pinnedStates: ['COMPLETED'],
+    })
+    deps.codeExecutor.mockResolvedValue(makeSuccessResult({ outputs: { x: '1' } }))
+    const sm = createSM(deps)
+
+    await sm.startInstance(instanceId)
+    const callsAfterFirst = deps.codeExecutor.mock.calls.length
+    expect(callsAfterFirst).toBeGreaterThan(0)
+
+    // Re-trigger processCurrentState — completed_at is set, so finalizer must not re-run.
+    await sm.startInstance(instanceId)
+    expect(deps.codeExecutor.mock.calls.length).toBe(callsAfterFirst)
+  })
+})
