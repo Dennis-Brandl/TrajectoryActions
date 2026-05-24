@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { Routes, Route } from 'react-router'
 import Layout from './layout/Layout'
 import { PanelProvider } from './layout/PanelContext'
+import { WelcomeSplash } from './components/WelcomeSplash'
 import DashboardPage from './features/dashboard/DashboardPage'
 import EnvironmentsPage from './features/environments/EnvironmentsPage'
 import EnvironmentDetailPage from './features/environments/EnvironmentDetailPage'
@@ -13,6 +15,12 @@ import LogPage from './features/log/LogPage'
 import SettingsPage from './features/settings/SettingsPage'
 
 export default function App() {
+  const [splashDismissed, setSplashDismissed] = useState(false)
+
+  if (!splashDismissed) {
+    return <WelcomeSplash onContinue={() => setSplashDismissed(true)} />
+  }
+
   return (
     <PanelProvider>
       <Routes>
