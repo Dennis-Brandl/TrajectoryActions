@@ -111,7 +111,7 @@ function StateTimeline({
 }
 
 // ---- Parameters table ----
-function ParametersTable({ params }: { params: Array<{ name: string; value: string }> }) {
+function ParametersTable({ params }: { params: Array<{ key: string; value: string }> }) {
   if (params.length === 0) {
     return <p className="text-muted-foreground text-sm">None</p>
   }
