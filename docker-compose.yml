@@ -1,0 +1,46 @@
+##############################################################################
+# Trajectory Action Container — Docker Compose
+#
+# Builds the server + console from this file. Run it from INSIDE the
+# TrajectoryActions/ directory; the build context is set to the parent (..)
+# so the sibling TrajectoryEditor repo is available to the console build.
+# TrajectoryEditor MUST be present alongside TrajectoryActions.
+#
+# Usage (from TrajectoryActions/):
+#   docker compose up --build -d
+#   docker compose down
+#   docker compose down -v        # also delete the SQLite volume
+#
+# Access:
+#   Console (UI):     http://localhost:3003
+#   Server (REST):    http://localhost:3002   (the console proxies to it)
+##############################################################################
+
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: TrajectoryActions/Dockerfile
+      target: server
+    ports:
+      - '3002:3002'
+    volumes:
+      - trajectoryactions-data:/data
+    restart: unless-stopped
+
+  console:
+    build:
+      context: ..
+      dockerfile: TrajectoryActions/Dockerfile
+      target: console
+    ports:
+      - '3003:80'
+    environment:
+      # The console (nginx) reverse-proxies /trajectory + /management here.
+      - ACTIONS_API_UPSTREAM=http://server:3002
+    depends_on:
+      - server
+    restart: unless-stopped
+
+volumes:
+  trajectoryactions-data:
