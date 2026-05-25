@@ -60,6 +60,15 @@ export default function TopNav() {
           className="flex-1 bg-transparent outline-none text-foreground placeholder:text-muted-foreground"
         />
       </div>
+      <a
+        href="/help.html"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="ml-2 px-2 py-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors text-xs font-medium"
+        title="Open the help guide"
+      >
+        Help
+      </a>
       <button
         onClick={toggleTheme}
         className="ml-3 p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"

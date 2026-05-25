@@ -51,7 +51,7 @@ RUN cd TrajectoryActions && npm ci
 # Compile the server's TS project graph (storage + engine + server) → dist
 RUN cd TrajectoryActions && npx tsc --build packages/server
 # Build the console SPA (Vite only — typecheck is not needed for the artifact)
-RUN cd TrajectoryActions/apps/console && npx vite build
+RUN cd TrajectoryActions/apps/console && npm run build:help && npx vite build
 # Bundle the server to one ESM file; better-sqlite3 stays external (native addon)
 RUN cd TrajectoryActions && npx esbuild packages/server/src/index.ts \
       --bundle \
