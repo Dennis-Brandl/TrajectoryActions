@@ -10,7 +10,7 @@ export { SettingsRepository } from './repositories/settings.repository.js'
 export { createTransactionHelper } from './transaction.js'
 export { StorageError, NotFoundError, ValidationError } from './errors.js'
 
-export { openDatabase } from './database.js'
+export { openDatabase, EXPECTED_TABLES, databaseSchemaStatus } from './database.js'
 export type { BetterSqlite3Database } from './database.js'
 
 export { runMigrations } from './migrations/runner.js'
@@ -47,7 +47,7 @@ export type {
   SettingInput,
 } from './types.js'
 
-import { openDatabase } from './database.js'
+import { openDatabase, databaseSchemaStatus } from './database.js'
 import { runMigrations } from './migrations/runner.js'
 import { migration as initialMigration } from './migrations/001-initial-schema.js'
 import { migration as actionTimeoutMigration } from './migrations/002-action-timeout.js'
@@ -61,5 +61,18 @@ import type BetterSqlite3 from 'better-sqlite3'
 export function initializeDatabase(path: string): BetterSqlite3.Database {
   const db = openDatabase(path)
   runMigrations(db, [initialMigration, actionTimeoutMigration, lifecycleStateMigration])
+
+  // Permanent rule: a distributed app must guarantee its DB has all required
+  // tables on startup. Migrations create them; verify and refuse to serve an
+  // incomplete database (e.g. a corrupt/partial file whose _migrations table
+  // claims everything is applied while the tables are actually missing).
+  const { ok, missingTables } = databaseSchemaStatus(db)
+  if (!ok) {
+    throw new Error(
+      `[storage] FATAL: schema verification failed after migrations — missing tables: ` +
+        `${missingTables.join(', ')} (db: ${path}). Refusing to start with an incomplete database.`
+    )
+  }
+
   return db
 }

@@ -100,9 +100,10 @@ ENV NODE_ENV=production \
 EXPOSE 3002
 VOLUME ["/data"]
 
-# No dedicated /health route exists yet, so probe the TCP port with Node.
+# Probe the /health route (DB connectivity + schema present), not just the TCP
+# port — an empty/incomplete database must report unhealthy.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD node -e "const s=require('net').connect(3002,'127.0.0.1');s.setTimeout(3000);s.on('connect',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));s.on('timeout',()=>process.exit(1))"
+  CMD node -e "require('http').get('http://127.0.0.1:3002/health',r=>{r.resume();r.on('end',()=>process.exit(r.statusCode===200?0:1))}).on('error',()=>process.exit(1))"
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 

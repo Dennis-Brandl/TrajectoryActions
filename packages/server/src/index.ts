@@ -5,6 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   initializeDatabase,
+  databaseSchemaStatus,
   ActionRepository,
   InstanceRepository,
   SettingsRepository,
@@ -100,6 +101,24 @@ app.use(
 
 app.use(morgan('dev'))
 app.use(express.json())
+
+// Health/readiness: verifies DB connectivity AND that the schema is fully
+// present. Unauthenticated so the container HEALTHCHECK can probe it. Returns
+// 503 over an empty/incomplete database instead of a green TCP port.
+app.get('/health', (_req, res) => {
+  try {
+    db.prepare('SELECT 1').get()
+  } catch {
+    return void res.status(503).json({ status: 'error', message: 'database connection failed' })
+  }
+  const { ok, missingTables } = databaseSchemaStatus(db)
+  if (!ok) {
+    return void res
+      .status(503)
+      .json({ status: 'error', message: 'database schema incomplete', missingTables })
+  }
+  return void res.json({ status: 'ok' })
+})
 
 // API key auth on all /trajectory/v1/ routes
 app.use('/trajectory/v1', createApiKeyAuth(settingsRepo))
