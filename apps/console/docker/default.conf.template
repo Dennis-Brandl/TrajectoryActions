@@ -1,7 +1,8 @@
 # nginx config for the Trajectory Action Container console.
 # Rendered at container start by the official nginx image's envsubst step,
 # which fills ${ACTIONS_API_UPSTREAM} (e.g. http://actions-server:3002).
-# nginx runtime vars ($host, $uri) are NOT env vars, so they are preserved.
+# nginx runtime vars ($host, $uri, $upstream) are NOT env vars, so envsubst
+# leaves them untouched (it only substitutes defined env vars).
 
 server {
     listen 80;
@@ -9,10 +10,17 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # Resolve the upstream at request time via Docker's embedded DNS instead of
+    # at config load. Putting the upstream in a variable stops nginx from
+    # aborting on startup ("host not found in upstream") when actions-server is
+    # not up yet, and lets it pick up a new container IP after a restart.
+    resolver 127.0.0.11 ipv6=off valid=10s;
+
     # REST API: proxy to the Action Container server. proxy_buffering off and a
     # long read timeout keep Server-Sent Events (SSE) streaming endpoints alive.
     location /trajectory/ {
-        proxy_pass ${ACTIONS_API_UPSTREAM};
+        set $upstream ${ACTIONS_API_UPSTREAM};
+        proxy_pass $upstream;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -23,7 +31,8 @@ server {
     }
 
     location /management/ {
-        proxy_pass ${ACTIONS_API_UPSTREAM};
+        set $upstream ${ACTIONS_API_UPSTREAM};
+        proxy_pass $upstream;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

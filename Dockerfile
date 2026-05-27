@@ -85,7 +85,10 @@ COPY --from=builder /app/TrajectoryActions/packages/python-sidecar ./packages/py
 
 # Entrypoint
 COPY TrajectoryActions/docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+# Normalize line endings: a stale CRLF checkout would make the shebang
+# '#!/bin/sh\r' unrunnable (exec: no such file or directory). Strip CR so the
+# image never depends on the host's git line-ending state.
+RUN sed -i 's/\r$//' /app/docker-entrypoint.sh && chmod +x /app/docker-entrypoint.sh
 
 # Non-root runtime user; /data holds the SQLite DB
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup \
@@ -122,4 +125,4 @@ ENV ACTIONS_API_UPSTREAM=http://actions-server:3002
 EXPOSE 80
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD wget -q -O /dev/null http://localhost:80/ || exit 1
+  CMD wget -q -O /dev/null http://127.0.0.1:80/ || exit 1
