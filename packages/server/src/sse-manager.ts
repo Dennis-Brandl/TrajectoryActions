@@ -272,6 +272,23 @@ export class SseManager {
     }
   }
 
+  /**
+   * Immediately tear down the per-instance event bus: clears heartbeat + any
+   * pending terminal-linger timer, drops every listener, and removes the bus
+   * entry. Called by the management `DELETE /instances/:id` route so a
+   * force-deleted instance leaves no lingering heartbeat or SSE subscribers
+   * referencing a row that no longer exists. No-op if no bus is registered
+   * (typical for terminal-then-linger-then-gc instances).
+   */
+  destroyInstanceBus(instanceId: string): void {
+    const bus = this.buses.get(instanceId)
+    if (!bus) return
+    clearInterval(bus.heartbeatTimer)
+    if (bus.terminalTimer) clearTimeout(bus.terminalTimer)
+    bus.listeners.clear()
+    this.buses.delete(instanceId)
+  }
+
   // --------------------------------------------------------
   // Public: shutdown
   // --------------------------------------------------------

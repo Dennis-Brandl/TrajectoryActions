@@ -125,6 +125,42 @@ export function createManagementRouter(
   )
 
   // --------------------------------------------------------
+  // MGMT-00: GET /server-info
+  //
+  // Reports this server's externally-reachable REST base URL so the console
+  // top-bar can display the correct address for workflow authors to copy
+  // into an env's action_server_specifications.
+  //
+  // In dev the console runs on Vite (default :5176) and proxies /trajectory
+  // and /management to the Express server on PORT (default :3002 via .env).
+  // Without this endpoint the top bar fell back to `window.location.origin`,
+  // which showed the *console's* URL — useless to runtime clients because
+  // (a) it depends on Vite being up, and (b) `http://localhost:5176/` only
+  // serves the console SPA, not the REST API root.
+  //
+  // Source of truth for the URL:
+  //   1. PUBLIC_BASE_URL env var (operator override, used when the console is
+  //      reached through a reverse proxy or a non-default hostname).
+  //   2. `http://localhost:${PORT}` otherwise — works for the standard
+  //      dev (npm run dev) and docker-compose setups.
+  // --------------------------------------------------------
+  router.get('/server-info', (_req, res) => {
+    const port = Number(process.env.PORT ?? 3001)
+    const publicBaseUrl =
+      process.env.PUBLIC_BASE_URL && process.env.PUBLIC_BASE_URL.length > 0
+        ? process.env.PUBLIC_BASE_URL.replace(/\/+$/, '')
+        : `http://localhost:${port}`
+    res.status(200).json({
+      data: {
+        rest_base_url: publicBaseUrl,
+        protocol_path: '/trajectory/v1/',
+        port,
+      },
+      meta: {},
+    })
+  })
+
+  // --------------------------------------------------------
   // MGMT-01: GET /dashboard
   // --------------------------------------------------------
   router.get('/dashboard', (req, res, next) => {
@@ -2498,6 +2534,38 @@ export function createManagementRouter(
           command,
           accepted: true,
         },
+        meta: {},
+      })
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  // MGMT-15b: DELETE /instances/:id (force-remove an instance row, regardless of state)
+  //
+  // The protocol-level DELETE at /trajectory/v1/instances/:id calls
+  // manager.cancelInstance, which sends ABORT through the state machine and
+  // kills the worker but leaves the row in the DB. That's fine for normal
+  // shutdown, but it can't recover from instances stuck in non-terminal
+  // states (e.g. ABORTING after a worker crash) because the env-delete route
+  // rejects with 409 on any "active" (completed_at IS NULL) instance. This
+  // route gives operators a single hammer to clean those rows out so the
+  // owning environment can subsequently be deleted.
+  router.delete('/instances/:id', async (req, res, next) => {
+    try {
+      const id = req.params.id as string
+      const instance = manager.getInstance(id)
+      if (!instance) {
+        return void res.status(404).json({
+          error: { code: 'NOT_FOUND', message: 'Instance not found', details: {} },
+        })
+      }
+      const deleted = await manager.forceDeleteInstance(id)
+      // Tear down the per-instance SSE bus so no heartbeat/listener lingers
+      // referencing the now-removed row.
+      sseManager.destroyInstanceBus(id)
+      res.status(200).json({
+        data: { deleted, instance_id: id },
         meta: {},
       })
     } catch (err) {

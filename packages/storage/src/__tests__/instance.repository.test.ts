@@ -479,6 +479,38 @@ describe('InstanceRepository', () => {
     })
   })
 
+  describe('deleteById', () => {
+    it('removes the instance row regardless of state (covers ABORTING stuck rows)', () => {
+      // The whole point of force-delete is recovering instances that are NOT
+      // terminal — env-delete already cleans up terminal rows via cascade.
+      const stuck = repo.create(makeInput({ state: 'ABORTING' }))
+      expect(repo.deleteById(stuck.runtime_action_instance_id)).toBe(1)
+      expect(repo.findById(stuck.runtime_action_instance_id)).toBeNull()
+    })
+
+    it('also works on terminal rows', () => {
+      const term = repo.create(makeInput())
+      repo.updateState(term.runtime_action_instance_id, 'COMPLETED', {
+        completed_at: new Date().toISOString(),
+      })
+      expect(repo.deleteById(term.runtime_action_instance_id)).toBe(1)
+      expect(repo.findById(term.runtime_action_instance_id)).toBeNull()
+    })
+
+    it('returns 0 when the instance does not exist (idempotent on retries)', () => {
+      expect(repo.deleteById('does-not-exist')).toBe(0)
+    })
+
+    it('only removes the targeted instance, leaving siblings untouched', () => {
+      const a = repo.create(makeInput({ state: 'ABORTING' }))
+      const b = repo.create(makeInput({ state: 'EXECUTING' }))
+      expect(repo.deleteById(a.runtime_action_instance_id)).toBe(1)
+      expect(repo.findById(a.runtime_action_instance_id)).toBeNull()
+      expect(repo.findById(b.runtime_action_instance_id)).not.toBeNull()
+      expect(repo.count()).toBe(1)
+    })
+  })
+
   // -------------------------------------------------------------------------
   // count and countActive
   // -------------------------------------------------------------------------

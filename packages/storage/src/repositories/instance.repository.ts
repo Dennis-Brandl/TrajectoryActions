@@ -15,6 +15,7 @@ export class InstanceRepository {
   private readonly stmtMarkLogged: BetterSqlite3.Statement
   private readonly stmtDeleteByEnvironment: BetterSqlite3.Statement
   private readonly stmtDeleteByAction: BetterSqlite3.Statement
+  private readonly stmtDeleteById: BetterSqlite3.Statement
   private readonly stmtCount: BetterSqlite3.Statement
   private readonly stmtCountActive: BetterSqlite3.Statement
 
@@ -70,6 +71,10 @@ export class InstanceRepository {
 
     this.stmtDeleteByAction = db.prepare(`
       DELETE FROM instances WHERE action_oid = ?
+    `)
+
+    this.stmtDeleteById = db.prepare(`
+      DELETE FROM instances WHERE runtime_action_instance_id = ?
     `)
 
     this.stmtCount = db.prepare(`
@@ -244,6 +249,18 @@ export class InstanceRepository {
 
   deleteByAction(actionOid: string): number {
     const result = this.stmtDeleteByAction.run(actionOid)
+    return result.changes
+  }
+
+  /**
+   * Force-delete a single instance row by id, ignoring its state. Used by the
+   * management `DELETE /instances/:id` route so operators can clean up
+   * instances stuck in non-terminal states (e.g. ABORTING with a dead worker)
+   * that would otherwise block environment deletion. Returns the number of
+   * rows removed (0 if not found, 1 on success).
+   */
+  deleteById(instanceId: string): number {
+    const result = this.stmtDeleteById.run(instanceId)
     return result.changes
   }
 

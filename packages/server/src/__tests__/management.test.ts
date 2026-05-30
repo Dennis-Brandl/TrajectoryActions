@@ -186,6 +186,58 @@ function seedAction(
 }
 
 // ============================================================
+// 0. Server info (MGMT-00) — the URL the console top-bar shows
+// ============================================================
+
+describe('GET /management/v1/server-info', () => {
+  it("returns this server's REST base URL + protocol path + port", async () => {
+    // Pin PORT for the duration of this test so we can assert the URL the
+    // route synthesizes. The route reads process.env.PORT at request time.
+    const prevPort = process.env.PORT
+    const prevPublic = process.env.PUBLIC_BASE_URL
+    process.env.PORT = '4242'
+    delete process.env.PUBLIC_BASE_URL
+    const { app, manager } = createTestApp()
+    try {
+      const res = await request(app).get('/management/v1/server-info')
+      expect(res.status).toBe(200)
+      expect(res.body.data.rest_base_url).toBe('http://localhost:4242')
+      expect(res.body.data.protocol_path).toBe('/trajectory/v1/')
+      expect(res.body.data.port).toBe(4242)
+    } finally {
+      await manager.shutdown()
+      // Restore previous env so we don't leak across tests.
+      if (prevPort === undefined) delete process.env.PORT
+      else process.env.PORT = prevPort
+      if (prevPublic !== undefined) process.env.PUBLIC_BASE_URL = prevPublic
+    }
+  }, 30000)
+
+  it('honors PUBLIC_BASE_URL override and strips trailing slashes', async () => {
+    // Operators set PUBLIC_BASE_URL when the server is behind a reverse proxy
+    // or reachable at a non-localhost hostname; we must not double-slash on
+    // join with protocol_path.
+    const prevPort = process.env.PORT
+    const prevPublic = process.env.PUBLIC_BASE_URL
+    process.env.PORT = '3002'
+    process.env.PUBLIC_BASE_URL = 'https://action-server.example.com/'
+    const { app, manager } = createTestApp()
+    try {
+      const res = await request(app).get('/management/v1/server-info')
+      expect(res.status).toBe(200)
+      expect(res.body.data.rest_base_url).toBe('https://action-server.example.com')
+      expect(res.body.data.protocol_path).toBe('/trajectory/v1/')
+    } finally {
+      await manager.shutdown()
+      if (prevPort === undefined) delete process.env.PORT
+      else process.env.PORT = prevPort
+      if (prevPublic === undefined) delete process.env.PUBLIC_BASE_URL
+      else process.env.PUBLIC_BASE_URL = prevPublic
+    }
+  }, 30000)
+})
+
+// ============================================================
 // 1. Dashboard (MGMT-01)
 // ============================================================
 

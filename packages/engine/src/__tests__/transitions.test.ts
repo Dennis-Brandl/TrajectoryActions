@@ -235,6 +235,14 @@ describe('OPAQUE_TRANSITION_TABLE', () => {
     it('IN_PROGRESS SC -> COMPLETED', () => {
       expect(OPAQUE_TRANSITION_TABLE.get('IN_PROGRESS')?.get('SC')).toBe('COMPLETED')
     })
+
+    it('ABORTING SC -> ABORTED (recovery state can settle without a pinned ABORTING handler)', () => {
+      expect(OPAQUE_TRANSITION_TABLE.get('ABORTING')?.get('SC')).toBe('ABORTED')
+    })
+
+    it('STOPPING SC -> COMPLETED (recovery state can settle without a pinned STOPPING handler)', () => {
+      expect(OPAQUE_TRANSITION_TABLE.get('STOPPING')?.get('SC')).toBe('COMPLETED')
+    })
   })
 
   describe('ABORT and STOP', () => {
@@ -286,8 +294,13 @@ describe('OPAQUE_TRANSITION_TABLE', () => {
 // ============================================================
 
 describe('OPAQUE_AUTO_ADVANCE', () => {
-  it('has exactly 3 entries', () => {
-    expect(OPAQUE_AUTO_ADVANCE.size).toBe(3)
+  it('has exactly 5 entries (3 happy-path + 2 recovery → terminal)', () => {
+    // The recovery → terminal entries (ABORTING → ABORTED, STOPPING → COMPLETED)
+    // mirror the observable AUTO_ADVANCE map and exist so an opaque action that
+    // fell into a recovery state — typically via executeCode synthesizing
+    // enterState('ABORTING') after a Python exception — can finish settling
+    // instead of sticking at ABORTING/STOPPING forever.
+    expect(OPAQUE_AUTO_ADVANCE.size).toBe(5)
   })
 
   it('POSTED -> RECEIVED', () => expect(OPAQUE_AUTO_ADVANCE.get('POSTED')).toBe('RECEIVED'))
@@ -295,6 +308,10 @@ describe('OPAQUE_AUTO_ADVANCE', () => {
     expect(OPAQUE_AUTO_ADVANCE.get('RECEIVED')).toBe('IN_PROGRESS'))
   it('IN_PROGRESS -> COMPLETED', () =>
     expect(OPAQUE_AUTO_ADVANCE.get('IN_PROGRESS')).toBe('COMPLETED'))
+  it('ABORTING -> ABORTED (recovery → terminal)', () =>
+    expect(OPAQUE_AUTO_ADVANCE.get('ABORTING')).toBe('ABORTED'))
+  it('STOPPING -> COMPLETED (recovery → terminal)', () =>
+    expect(OPAQUE_AUTO_ADVANCE.get('STOPPING')).toBe('COMPLETED'))
 })
 
 // ============================================================

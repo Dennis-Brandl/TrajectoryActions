@@ -415,6 +415,42 @@ export class InstanceManager {
   }
 
   /**
+   * Force-delete an instance row from the database, regardless of its state.
+   *
+   * Used by the management `DELETE /instances/:id` route to clean up instances
+   * stuck in non-terminal states (e.g. ABORTING after the worker died before
+   * completing the state transition). Such instances block environment
+   * deletion because env-delete rejects with 409 when any owned action has an
+   * "active" (completed_at IS NULL) instance.
+   *
+   * Best-effort kills any worker still executing for this instance, drops any
+   * per-invoke action_property_overrides, then removes the row. Returns true
+   * when a row was deleted, false when the instance was not found.
+   *
+   * SSE bus cleanup is the caller's responsibility (see SseManager.destroyInstanceBus)
+   * because the engine package does not depend on the SSE manager.
+   */
+  async forceDeleteInstance(instanceId: string): Promise<boolean> {
+    const instance = this.instanceRepo.findById(instanceId)
+    if (!instance) return false
+
+    // Best-effort: if a worker is still running this instance's code, kill it.
+    // killWorker is a no-op when nothing is active for this id.
+    try {
+      await this.pool.killWorker(instanceId)
+    } catch {
+      // Kill failures must not block row removal — the whole point of this
+      // route is to recover from broken states.
+    }
+
+    // Drop any per-invoke action_property_overrides stashed for this instance
+    // (would otherwise leak until process restart).
+    this.actionPropertyOverrides.delete(instanceId)
+
+    return this.instanceRepo.deleteById(instanceId) > 0
+  }
+
+  /**
    * Dry-run code execution without creating an instance record.
    * Acquires a pool worker, runs the provided source code, releases the worker.
    * Used by MGMT-12 code test endpoint.

@@ -83,6 +83,17 @@ function buildOpaqueTransitionTable(): Map<string, Map<string, string>> {
   addTransition('RECEIVED', 'SC', 'IN_PROGRESS')
   addTransition('IN_PROGRESS', 'SC', 'COMPLETED')
 
+  // Recovery → terminal SC transitions. Opaque actions can land in ABORTING
+  // (or STOPPING) two ways: an explicit ABORT/STOP command from a non-
+  // terminal state, or an execution failure in executeCode() which
+  // synthesizes `enterState(instanceId, 'ABORTING', { error })`. Without
+  // these transitions there is no path out of ABORTING/STOPPING for opaque
+  // actions and the instance sticks at the recovery state forever (matches
+  // the symptom reported when BakeItem hit `int('')` and stalled at
+  // ABORTING). The observable table has the equivalents — see line 60-62.
+  addTransition('ABORTING', 'SC', 'ABORTED')
+  addTransition('STOPPING', 'SC', 'COMPLETED')
+
   // ABORT and STOP from opaque active states
   const opaqueActive = ['POSTED', 'RECEIVED', 'IN_PROGRESS']
   for (const state of opaqueActive) {
@@ -127,11 +138,19 @@ export const AUTO_ADVANCE: Map<string, string> = new Map([
 /**
  * Auto-advance map for opaque states.
  * Maps each opaque state to its SC-triggered next state.
+ *
+ * ABORTING/STOPPING are included so an opaque action that fell into a
+ * recovery state (typically because executeCode hit a Python exception
+ * and synthesized `enterState(... 'ABORTING' ...)`) auto-advances to the
+ * terminal state instead of sticking at ABORTING/STOPPING forever. They
+ * mirror the observable map's ABORTING/STOPPING entries.
  */
 export const OPAQUE_AUTO_ADVANCE: Map<string, string> = new Map([
   ['POSTED', 'RECEIVED'],
   ['RECEIVED', 'IN_PROGRESS'],
   ['IN_PROGRESS', 'COMPLETED'],
+  ['ABORTING', 'ABORTED'],
+  ['STOPPING', 'COMPLETED'],
 ])
 
 // ============================================================

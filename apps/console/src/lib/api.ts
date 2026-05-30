@@ -1,5 +1,6 @@
 import type {
   DashboardResponse,
+  ServerInfoResponse,
   EnvironmentsResponse,
   EnvironmentSummary,
   EnvironmentDetail,
@@ -57,6 +58,11 @@ async function apiFetchRaw<T>(path: string, init?: RequestInit): Promise<ApiEnve
 }
 
 export const api = {
+  // ---- Server info ----
+  // The REST URL this server is reachable at — used by the top bar so the
+  // displayed URL is the actual REST endpoint, not the console's own URL.
+  serverInfo: (): Promise<ServerInfoResponse> => apiFetch('/server-info'),
+
   // ---- Dashboard ----
   dashboard: (): Promise<DashboardResponse> => apiFetch('/dashboard'),
 
@@ -168,6 +174,13 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ command }),
     }),
+
+  // Force-delete an instance row regardless of its state. The server kills any
+  // active worker, drops the row, and tears down the per-instance SSE bus.
+  // Used to clean up instances stuck in ABORTING (or any non-terminal state)
+  // that would otherwise block environment deletion.
+  deleteInstance: (id: string): Promise<{ deleted: boolean; instance_id: string }> =>
+    apiFetch(`/instances/${id}`, { method: 'DELETE' }),
 
   // ---- Execution Log ----
   logEntries: async (params?: LogQueryParams): Promise<LogEntriesResponse> => {

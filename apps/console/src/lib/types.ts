@@ -57,6 +57,24 @@ export interface DashboardResponse {
   recent_log_entries: RecentLogEntry[]
 }
 
+// ---- Server info ----
+
+/**
+ * Returned by GET /management/v1/server-info — the externally-reachable REST
+ * URL of THIS container. Used by the console top bar so workflow authors
+ * can copy the right URL into env.action_server_specifications, rather than
+ * the console's own URL (which differs when the console runs under Vite or
+ * behind a reverse proxy).
+ */
+export interface ServerInfoResponse {
+  /** Base URL the REST API is reachable at, without trailing slash. */
+  rest_base_url: string
+  /** Conventional protocol path the runtime appends, e.g. "/trajectory/v1/". */
+  protocol_path: string
+  /** Numeric port the server is listening on. */
+  port: number
+}
+
 // ---- Upload ----
 
 export interface ImportedItem {

@@ -492,6 +492,107 @@ describe('POST /management/v1/instances/:id/command (MGMT-15)', () => {
 })
 
 // ============================================================
+// 4b. Force-delete instance (MGMT-15b)
+// ============================================================
+
+describe('DELETE /management/v1/instances/:id (MGMT-15b — force-delete)', () => {
+  it('returns 404 for unknown instance id', async () => {
+    const { app, manager } = createTestApp()
+    try {
+      const res = await request(app).delete('/management/v1/instances/does-not-exist')
+      expect(res.status).toBe(404)
+      expect(res.body.error.code).toBe('NOT_FOUND')
+    } finally {
+      await manager.shutdown()
+    }
+  }, 30000)
+
+  it('force-deletes an ABORTING-stuck instance so env-delete is no longer blocked', async () => {
+    // This is the exact scenario the route was added for: an instance whose
+    // worker died mid-abort, leaving the row at state ABORTING / completed_at=null
+    // forever. Before this route, /environments/:oid DELETE rejects with 409.
+    const { app, manager, db, instanceRepo, environmentRepo } = createTestApp()
+    try {
+      const envOid = seedEnvironment(db, 'env-fdel-001', 'StuckEnv')
+      const actionOid = seedAction(db, envOid, 'act-fdel-001', 'opaque', 'StuckAction')
+
+      // Hand-craft a stuck instance directly via the repo (state ABORTING,
+      // completed_at null) — bypasses the state machine to mimic a crashed
+      // worker that never finalized.
+      const stuck = instanceRepo.create({
+        runtime_action_instance_id: 'placeholder',
+        action_oid: actionOid,
+        environment_oid: envOid,
+        workflow_instance_id: 'wf-stuck',
+        step_instance_id: 'step-stuck',
+        step_oid: 'step-oid-stuck',
+        visibility: 'opaque',
+        state: 'ABORTING',
+        input_parameters: [],
+        output_parameters: [],
+        state_history: [],
+        pinned_code_versions: [],
+        states_with_code_executed: [],
+      })
+      const stuckId = stuck.runtime_action_instance_id
+
+      // Sanity: env-delete would refuse this state.
+      expect(instanceRepo.findById(stuckId)?.completed_at).toBeNull()
+
+      // Force-delete via the new route.
+      const res = await request(app).delete(`/management/v1/instances/${stuckId}`)
+      expect(res.status).toBe(200)
+      expect(res.body.data.deleted).toBe(true)
+      expect(res.body.data.instance_id).toBe(stuckId)
+
+      // Row is actually gone.
+      expect(instanceRepo.findById(stuckId)).toBeNull()
+
+      // And the env can now be deleted (no more active instances blocking).
+      expect(environmentRepo.findByOid(envOid)).not.toBeNull()
+    } finally {
+      await manager.shutdown()
+    }
+  }, 30000)
+
+  it('also works on terminal instances (admin cleanup)', async () => {
+    const { app, manager, db, instanceRepo } = createTestApp()
+    try {
+      const envOid = seedEnvironment(db, 'env-term-001', 'TermEnv')
+      const actionOid = seedAction(db, envOid, 'act-term-001', 'opaque', 'TermAction')
+
+      const inst = instanceRepo.create({
+        runtime_action_instance_id: 'placeholder',
+        action_oid: actionOid,
+        environment_oid: envOid,
+        workflow_instance_id: 'wf-term',
+        step_instance_id: 'step-term',
+        step_oid: 'step-oid-term',
+        visibility: 'opaque',
+        state: 'COMPLETED',
+        input_parameters: [],
+        output_parameters: [],
+        state_history: [],
+        pinned_code_versions: [],
+        states_with_code_executed: [],
+      })
+      instanceRepo.updateState(inst.runtime_action_instance_id, 'COMPLETED', {
+        completed_at: new Date().toISOString(),
+      })
+
+      const res = await request(app).delete(
+        `/management/v1/instances/${inst.runtime_action_instance_id}`
+      )
+      expect(res.status).toBe(200)
+      expect(res.body.data.deleted).toBe(true)
+      expect(instanceRepo.findById(inst.runtime_action_instance_id)).toBeNull()
+    } finally {
+      await manager.shutdown()
+    }
+  }, 30000)
+})
+
+// ============================================================
 // 5. Log query (MGMT-16)
 // ============================================================
 

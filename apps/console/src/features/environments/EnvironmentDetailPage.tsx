@@ -101,8 +101,16 @@ export default function EnvironmentDetailPage() {
   const { oid } = useParams<{ oid: string }>()
   const { data, isLoading, isError, error } = useEnvironment(oid ?? '')
 
+  // When the environment is deleted from another panel (e.g. the Environments
+  // list), React Query keeps the last successful `data` payload while
+  // returning isError=true on the refetch (default keepPreviousData behavior).
+  // Without the isError guard, useMemo would keep returning a pane payload
+  // built from the stale env, leaving the right pane showing actions/properties
+  // of an environment that no longer exists — and pairing badly with the
+  // "Failed to load environment" error rendered below. Treat isError as
+  // equivalent to no-data for pane registration so the pane clears on delete.
   const panePayload = useMemo(() => {
-    if (!data) return null
+    if (isError || !data) return null
     return {
       header: { eyebrow: 'ENVIRONMENT', name: `${data.local_id} v${data.version}` },
       content: (
@@ -160,7 +168,7 @@ export default function EnvironmentDetailPage() {
         </>
       ),
     }
-  }, [data])
+  }, [data, isError])
 
   useRegisterRightPane(panePayload)
 

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useParams } from 'react-router'
+import { Link, useNavigate, useParams } from 'react-router'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@trajectory/ui'
 import {
@@ -10,7 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { useInstance, useInstanceCommand } from './hooks'
+import { useDeleteInstance, useInstance, useInstanceCommand } from './hooks'
 import { getStateColor } from './InstancesPage'
 import { formatTimestamp, formatDuration } from '@/lib/utils'
 import type { StateHistoryEntry } from '@/lib/types'
@@ -137,10 +137,13 @@ function ParametersTable({ params }: { params: Array<{ key: string; value: strin
 
 export default function InstanceDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const instanceId = id ?? ''
   const { data: instance, isLoading, isError, error } = useInstance(instanceId)
   const commandMutation = useInstanceCommand()
+  const deleteMutation = useDeleteInstance()
   const [commandError, setCommandError] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const handleCommand = async (command: string) => {
     setCommandError(null)
@@ -148,6 +151,25 @@ export default function InstanceDetailPage() {
       await commandMutation.mutateAsync({ id: instanceId, command })
     } catch (err) {
       setCommandError(err instanceof Error ? err.message : 'Command failed')
+    }
+  }
+
+  const handleDelete = async () => {
+    setDeleteError(null)
+    // Force-delete bypasses the state machine — confirm with the user since
+    // it's destructive and works on instances stuck in any state.
+    if (
+      !window.confirm(
+        'Permanently remove this instance record? This kills any running worker and cannot be undone.'
+      )
+    ) {
+      return
+    }
+    try {
+      await deleteMutation.mutateAsync(instanceId)
+      navigate('/instances')
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Delete failed')
     }
   }
 
@@ -246,6 +268,22 @@ export default function InstanceDetailPage() {
           )}
 
           {commandError && <p className="text-destructive text-sm">{commandError}</p>}
+
+          {/* Force-delete is always available — its whole purpose is recovering
+              instances stuck in non-terminal states that won't respond to ABORT,
+              so it deliberately does NOT depend on getCommandButtons. */}
+          <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-border/40">
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={deleteMutation.isPending}
+              onClick={() => void handleDelete()}
+              title="Force-delete this instance record (cannot be undone). Use this to clear stuck instances so the owning environment can be deleted."
+            >
+              {deleteMutation.isPending ? 'Deleting...' : 'Delete instance'}
+            </Button>
+            {deleteError && <span className="text-destructive text-sm">{deleteError}</span>}
+          </div>
         </CardContent>
       </Card>
 
