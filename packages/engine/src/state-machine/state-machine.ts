@@ -4,7 +4,7 @@ import type { CodeVersionRepository } from '@trajectory/storage'
 import type { SettingsRepository } from '@trajectory/storage'
 import type { ActionRepository } from '@trajectory/storage'
 import type { EnvironmentRepository } from '@trajectory/storage'
-import { EngineError } from '../errors.js'
+import { EngineError, InvalidStateTransitionError } from '../errors.js'
 import { AUTO_ADVANCE, OPAQUE_AUTO_ADVANCE, validateCommand } from './transitions.js'
 import { isTerminal } from './states.js'
 import {
@@ -54,6 +54,13 @@ export interface CodeExecutionResult {
   stderr_capture: string
   /** Property mutations emitted by the Python sidecar (via trajectory.set_property). */
   property_mutations?: Array<{ spec_name: string; entry_name: string; value: string }>
+  /**
+   * Commands requested by user code via trajectory.request_command(). The state
+   * machine dispatches the first entry through `sendCommand` after this
+   * execution returns; per-state validity is enforced by `validateCommand`,
+   * not by the sidecar.
+   */
+  requested_commands?: Array<{ command: string; reason?: string }>
 }
 
 /**
@@ -426,6 +433,27 @@ export class StateMachine {
         if (!statesExecuted.includes(state)) {
           this.instanceRepo.markStatesWithCodeExecuted(instanceId, [...statesExecuted, state])
         }
+      }
+
+      // Code-requested command takes priority over the return_value-driven
+      // transitions below. Route through sendCommand so validateCommand enforces
+      // per-state legality (e.g. UNHOLD is only valid from HELD). An illegal
+      // request is converted to an ABORT so the action never lands in an
+      // inconsistent state.
+      if (result.requested_commands && result.requested_commands.length > 0) {
+        const requested = result.requested_commands[0]
+        try {
+          await this.sendCommand(instanceId, requested.command)
+        } catch (err) {
+          if (err instanceof InvalidStateTransitionError) {
+            await this.enterState(instanceId, 'ABORTING', {
+              error: `Invalid request_command(${requested.command}) from ${state}: ${err.message}`,
+            })
+            return
+          }
+          throw err
+        }
+        return
       }
 
       if (result.return_value === false && state === 'EXECUTING') {

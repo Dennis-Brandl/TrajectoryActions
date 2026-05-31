@@ -315,6 +315,120 @@ describe('StateMachine - Code-initiated HOLD', () => {
 })
 
 // ============================================================
+// Code-requested command (trajectory.request_command) tests
+// ============================================================
+
+describe('StateMachine - Code-requested commands', () => {
+  it('EXECUTING code requesting STOP drives STOPPING -> COMPLETED with no error', async () => {
+    const deps = createTestDeps()
+    const { instanceId } = createTestInstance(deps, { pinnedStates: ['EXECUTING'] })
+    deps.codeExecutor.mockResolvedValue(
+      makeSuccessResult({ requested_commands: [{ command: 'STOP' }] })
+    )
+    const sm = createSM(deps)
+
+    await sm.startInstance(instanceId)
+
+    expect(getState(deps, instanceId)).toBe('COMPLETED')
+    const states = getStateHistory(deps, instanceId).map((h) => h.state)
+    expect(states).toContain('STOPPING')
+    expect(states).toContain('COMPLETED')
+    expect(states).not.toContain('COMPLETING')
+
+    const instance = deps.instanceRepo.findById(instanceId)!
+    expect(instance.error).toBeNull()
+  })
+
+  it('EXECUTING code requesting ABORT drives ABORTING -> ABORTED without recording an exception', async () => {
+    const deps = createTestDeps()
+    const { instanceId } = createTestInstance(deps, { pinnedStates: ['EXECUTING'] })
+    deps.codeExecutor.mockResolvedValue(
+      makeSuccessResult({ requested_commands: [{ command: 'ABORT', reason: 'user cancelled' }] })
+    )
+    const sm = createSM(deps)
+
+    await sm.startInstance(instanceId)
+
+    expect(getState(deps, instanceId)).toBe('ABORTED')
+    const states = getStateHistory(deps, instanceId).map((h) => h.state)
+    expect(states).toContain('ABORTING')
+    expect(states).toContain('ABORTED')
+
+    // success=true means no traceback should have been recorded
+    const instance = deps.instanceRepo.findById(instanceId)!
+    expect(instance.traceback).toBeNull()
+  })
+
+  it('HELD code requesting UNHOLD drives HELD -> UNHOLDING -> EXECUTING (downstream-queue pattern)', async () => {
+    // First EXECUTING attempt holds, HELD code releases, EXECUTING completes the second time.
+    const deps = createTestDeps()
+    const { instanceId } = createTestInstance(deps, {
+      pinnedStates: ['EXECUTING', 'HELD'],
+    })
+    let executingCalls = 0
+    deps.codeExecutor.mockImplementation(async (_id, state) => {
+      if (state === 'EXECUTING') {
+        executingCalls += 1
+        // First entry: downstream full -> HOLD. Second entry: proceed.
+        return executingCalls === 1
+          ? makeSuccessResult({ return_value: false })
+          : makeSuccessResult({ return_value: true })
+      }
+      if (state === 'HELD') {
+        return makeSuccessResult({ requested_commands: [{ command: 'UNHOLD' }] })
+      }
+      return makeSuccessResult()
+    })
+    const sm = createSM(deps)
+
+    await sm.startInstance(instanceId)
+
+    expect(getState(deps, instanceId)).toBe('COMPLETED')
+    const states = getStateHistory(deps, instanceId).map((h) => h.state)
+    expect(states).toContain('HOLDING')
+    expect(states).toContain('HELD')
+    expect(states).toContain('UNHOLDING')
+    // EXECUTING appears twice: once before the hold, once after the unhold
+    expect(states.filter((s) => s === 'EXECUTING').length).toBe(2)
+    expect(executingCalls).toBe(2)
+  })
+
+  it('EXECUTING code requesting UNHOLD (invalid for state) aborts with a descriptive error', async () => {
+    const deps = createTestDeps()
+    const { instanceId } = createTestInstance(deps, { pinnedStates: ['EXECUTING'] })
+    deps.codeExecutor.mockResolvedValue(
+      makeSuccessResult({ requested_commands: [{ command: 'UNHOLD' }] })
+    )
+    const sm = createSM(deps)
+
+    await sm.startInstance(instanceId)
+
+    expect(getState(deps, instanceId)).toBe('ABORTED')
+    const instance = deps.instanceRepo.findById(instanceId)!
+    expect(instance.error).toContain('UNHOLD')
+    expect(instance.error).toContain('EXECUTING')
+  })
+
+  it('external HOLD deferred during execution wins over a code-requested STOP', async () => {
+    // An external command arriving during code execution is deferred and flushed
+    // before the engine looks at requested_commands — external overrides internal.
+    const deps = createTestDeps()
+    const { instanceId } = createTestInstance(deps, { pinnedStates: ['EXECUTING'] })
+    const sm = createSM(deps)
+    deps.codeExecutor.mockImplementation(async () => {
+      // External HOLD arrives mid-execution
+      await sm.sendCommand(instanceId, 'HOLD')
+      return makeSuccessResult({ requested_commands: [{ command: 'STOP' }] })
+    })
+
+    await sm.startInstance(instanceId)
+
+    // External HOLD wins -> HELD; the requested STOP is silently dropped.
+    expect(getState(deps, instanceId)).toBe('HELD')
+  })
+})
+
+// ============================================================
 // Error tests
 // ============================================================
 

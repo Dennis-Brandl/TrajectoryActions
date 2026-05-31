@@ -15,9 +15,14 @@ import io
 import contextlib
 import traceback
 import time
+import types
 
 # Cap stdout/stderr capture to prevent memory issues from chatty code (~64KB)
 MAX_OUTPUT_BYTES = 64 * 1024
+
+# Commands user code is allowed to request via trajectory.request_command().
+# Per-state validity (e.g. UNHOLD only from HELD) is enforced by the engine, not here.
+_ALLOWED_REQUEST_COMMANDS = frozenset({"ABORT", "STOP", "HOLD", "UNHOLD", "PAUSE"})
 
 
 class _PropertyWriteError(RuntimeError):
@@ -89,14 +94,17 @@ def run_user_code(source_code, inputs, outputs, props, action_props):
 def run_user_code_with_mutations(source_code, inputs, outputs, props, action_props):
     """
     Same as run_user_code but also returns the property_mutations list
-    populated by user-code calls to set_property(spec, entry, value).
+    populated by user-code calls to set_property(spec, entry, value) and
+    the requested_commands list populated by user-code calls to
+    trajectory.request_command(command, reason=None).
 
-    Returns: (return_value, stdout_text, stderr_text, mutations)
+    Returns: (return_value, stdout_text, stderr_text, mutations, requested_commands)
 
     Raises:
         SyntaxError:         if source_code cannot be compiled
         RuntimeError:        if execute() is not defined or not callable
         _PropertyWriteError: if set_property() is called with an unknown spec_name
+        ValueError:          if request_command() is called with an unsupported command
         Exception:           any other exception raised by user code
     """
     # Step 1: compile first so SyntaxError is distinct from RuntimeError
@@ -122,12 +130,33 @@ def run_user_code_with_mutations(source_code, inputs, outputs, props, action_pro
         props[spec_name][entry_name] = value
         mutations.append({"spec_name": spec_name, "entry_name": entry_name, "value": value})
 
+    # Step 3a: build requested-commands log and request_command closure
+    requested_commands = []
+
+    def request_command(command, reason=None):
+        if not isinstance(command, str):
+            raise TypeError("command must be str")
+        if command not in _ALLOWED_REQUEST_COMMANDS:
+            raise ValueError(
+                f"unsupported command: {command!r} "
+                f"(allowed: {sorted(_ALLOWED_REQUEST_COMMANDS)})"
+            )
+        if reason is not None and not isinstance(reason, str):
+            raise TypeError("reason must be str or None")
+        requested_commands.append({"command": command, "reason": reason})
+
+    # The `trajectory` namespace is the public API surface for new container
+    # affordances. `set_property` stays as a bare global for backwards compat
+    # with action code written before request_command existed.
+    trajectory_ns = types.SimpleNamespace(request_command=request_command)
+
     # Step 4: create namespace — same builtins access as run_user_code, plus new globals
     namespace = {
         "__builtins__": __builtins__,
         "properties": props,
         "action_properties": action_props,
         "set_property": set_property,
+        "trajectory": trajectory_ns,
     }
 
     # Step 5: exec the compiled code (defines execute() in the namespace)
@@ -159,8 +188,8 @@ def run_user_code_with_mutations(source_code, inputs, outputs, props, action_pro
             "utf-8", errors="replace"
         ) + "\n[stderr truncated]"
 
-    # Step 9: return tuple (return_value, stdout, stderr, mutations)
-    return return_value, stdout_text, stderr_text, mutations
+    # Step 9: return tuple (return_value, stdout, stderr, mutations, requested_commands)
+    return return_value, stdout_text, stderr_text, mutations, requested_commands
 
 
 def main():
@@ -194,6 +223,7 @@ def main():
                 "stdout_capture": "",
                 "stderr_capture": "",
                 "property_mutations": [],
+                "requested_commands": [],
             }
             print(json.dumps(response), flush=True)
             continue
@@ -209,7 +239,13 @@ def main():
 
         # Execute user code
         try:
-            return_value, stdout_text, stderr_text, mutations = run_user_code_with_mutations(
+            (
+                return_value,
+                stdout_text,
+                stderr_text,
+                mutations,
+                requested_commands,
+            ) = run_user_code_with_mutations(
                 source_code, inputs, outputs, props, action_props
             )
             response = {
@@ -221,6 +257,7 @@ def main():
                 "stdout_capture": stdout_text,
                 "stderr_capture": stderr_text,
                 "property_mutations": mutations,
+                "requested_commands": requested_commands,
             }
         except SyntaxError as e:
             response = {
@@ -235,6 +272,7 @@ def main():
                 "stdout_capture": "",
                 "stderr_capture": "",
                 "property_mutations": [],
+                "requested_commands": [],
             }
         except _PropertyWriteError as e:
             response = {
@@ -249,6 +287,7 @@ def main():
                 "stdout_capture": "",
                 "stderr_capture": "",
                 "property_mutations": [],
+                "requested_commands": [],
             }
         except Exception as e:  # noqa: BLE001
             response = {
@@ -263,6 +302,7 @@ def main():
                 "stdout_capture": "",
                 "stderr_capture": "",
                 "property_mutations": [],
+                "requested_commands": [],
             }
 
         # flush=True is critical so the Node.js parent receives output immediately

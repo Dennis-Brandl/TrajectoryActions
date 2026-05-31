@@ -337,7 +337,7 @@ def execute(inputs, outputs, props, action_props):
     return True
 """
     from sandbox_runner import run_user_code_with_mutations
-    return_value, _stdout, _stderr, mutations = run_user_code_with_mutations(
+    return_value, _stdout, _stderr, mutations, _req = run_user_code_with_mutations(
         source, inputs={}, outputs={}, props={'SIM_MODE': {'Value': 'false'}}, action_props={}
     )
     assert return_value is True
@@ -351,7 +351,7 @@ def execute(inputs, outputs, props, action_props):
     return properties is props and action_properties is action_props
 """
     from sandbox_runner import run_user_code_with_mutations
-    return_value, _stdout, _stderr, _ = run_user_code_with_mutations(
+    return_value, _stdout, _stderr, _, _req = run_user_code_with_mutations(
         source, inputs={}, outputs={}, props={'X': {'A': '1'}}, action_props={}
     )
     assert return_value is True
@@ -369,3 +369,62 @@ def execute(inputs, outputs, props, action_props):
     with pytest.raises(RuntimeError, match='unknown property'):
         run_user_code_with_mutations(source, inputs={}, outputs={},
                                      props={}, action_props={})
+
+
+def test_request_command_unhold_recorded():
+    """trajectory.request_command('UNHOLD') records the requested command."""
+    source = """
+def execute(inputs, outputs, props, action_props):
+    trajectory.request_command('UNHOLD')
+    return True
+"""
+    from sandbox_runner import run_user_code_with_mutations
+    return_value, _stdout, _stderr, _mut, requested = run_user_code_with_mutations(
+        source, inputs={}, outputs={}, props={}, action_props={}
+    )
+    assert return_value is True
+    assert requested == [{'command': 'UNHOLD', 'reason': None}]
+
+
+def test_request_command_with_reason_recorded():
+    """request_command preserves the optional reason string."""
+    source = """
+def execute(inputs, outputs, props, action_props):
+    trajectory.request_command('STOP', reason='operator cancelled batch')
+    return True
+"""
+    from sandbox_runner import run_user_code_with_mutations
+    _rv, _stdout, _stderr, _mut, requested = run_user_code_with_mutations(
+        source, inputs={}, outputs={}, props={}, action_props={}
+    )
+    assert requested == [{'command': 'STOP', 'reason': 'operator cancelled batch'}]
+
+
+def test_request_command_unsupported_raises_value_error():
+    """An unknown command name raises ValueError (surfaces as RUNTIME_ERROR)."""
+    source = """
+def execute(inputs, outputs, props, action_props):
+    trajectory.request_command('REBOOT')
+    return True
+"""
+    from sandbox_runner import run_user_code_with_mutations
+    import pytest
+    with pytest.raises(ValueError, match='unsupported command'):
+        run_user_code_with_mutations(source, inputs={}, outputs={},
+                                     props={}, action_props={})
+
+
+def test_multiple_request_commands_all_recorded():
+    """Multiple request_command calls in one execution are all buffered;
+    the engine decides which one to honor."""
+    source = """
+def execute(inputs, outputs, props, action_props):
+    trajectory.request_command('HOLD')
+    trajectory.request_command('UNHOLD')
+    return True
+"""
+    from sandbox_runner import run_user_code_with_mutations
+    _rv, _stdout, _stderr, _mut, requested = run_user_code_with_mutations(
+        source, inputs={}, outputs={}, props={}, action_props={}
+    )
+    assert [c['command'] for c in requested] == ['HOLD', 'UNHOLD']

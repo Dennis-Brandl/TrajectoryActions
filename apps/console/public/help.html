@@ -263,6 +263,11 @@
             <a href="#2-environments-and-actions">2. Environments and Actions</a>
           </li>
           <li class="toc-2"><a href="#3-writing-action-code">3. Writing Action Code</a></li>
+          <li class="toc-3">
+            <a href="#coordinating-state-transitions-from-code"
+              >Coordinating state transitions from code</a
+            >
+          </li>
           <li class="toc-2"><a href="#4-testing-code">4. Testing Code</a></li>
           <li class="toc-2"><a href="#5-instances">5. Instances</a></li>
           <li class="toc-2"><a href="#6-execution-log">6. Execution Log</a></li>
@@ -390,6 +395,125 @@
             <strong>Clear Code</strong> for a state (irreversible).
           </li>
         </ul>
+        <h3 id="coordinating-state-transitions-from-code">
+          <a class="anchor" href="#coordinating-state-transitions-from-code" aria-hidden="true">#</a
+          >Coordinating state transitions from code
+        </h3>
+        <p>
+          The Python code in each state can do more than process inputs and write outputs — it can
+          also signal the next state transition. Three signals are available without any imports:
+        </p>
+        <ul>
+          <li>
+            <strong>Return <code>True</code></strong> (or any non-<code>False</code> value, or no
+            return at all) — the state&#39;s work is done; the container advances to the next state
+            in the lifecycle (the <strong>SC</strong> transition).
+          </li>
+          <li>
+            <strong>Return <code>False</code> from EXECUTING</strong> — code-initiated
+            <strong>HOLD</strong>: the container moves through HOLDING into HELD, and waits there
+            until an <strong>Unhold</strong> signal arrives.
+          </li>
+          <li>
+            <strong>Raise any exception</strong> — code-initiated <strong>ABORT</strong>: the error
+            summary and traceback are recorded on the instance and the container moves through
+            ABORTING into ABORTED.
+          </li>
+        </ul>
+        <p>
+          In addition, code in any active state can call
+          <code>trajectory.request_command(&quot;...&quot;)</code> to request one of these commands
+          after the current execution returns:
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Effect</th>
+              <th>Valid from</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>HOLD</code></td>
+              <td>Hold the action (same destination as returning <code>False</code>).</td>
+              <td>Any active state.</td>
+            </tr>
+            <tr>
+              <td><code>UNHOLD</code></td>
+              <td>Release a held action — next state EXECUTING.</td>
+              <td>HELD only.</td>
+            </tr>
+            <tr>
+              <td><code>PAUSE</code></td>
+              <td>Pause the action so an operator can resume it later.</td>
+              <td>EXECUTING only.</td>
+            </tr>
+            <tr>
+              <td><code>STOP</code></td>
+              <td>Stop the action cleanly — next state COMPLETED.</td>
+              <td>Any active state.</td>
+            </tr>
+            <tr>
+              <td><code>ABORT</code></td>
+              <td>Abort the action without an exception — next state ABORTED.</td>
+              <td>Any active state.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          A requested command that isn&#39;t valid for the current state is reported as an execution
+          error and the action transitions to ABORTING.
+        </p>
+        <h4 id="example-holding-for-a-downstream-queue">
+          <a class="anchor" href="#example-holding-for-a-downstream-queue" aria-hidden="true">#</a
+          >Example: holding for a downstream queue
+        </h4>
+        <p>
+          A common reason to hold an action is throttling against a downstream resource. A packer
+          station, for example, may need to stop feeding a downstream wrapper whose buffer is full,
+          then resume once the wrapper has caught up. The action defines code in four states; the
+          container drives the cycle
+          <strong>EXECUTING → HOLDING → HELD → UNHOLDING → EXECUTING</strong> and repeats it every
+          time EXECUTING returns <code>False</code>.
+        </p>
+        <p>
+          <strong>EXECUTING</strong> — runs the normal operation; if downstream is full, ask to
+          hold:
+        </p>
+        <pre><code class="language-python">def execute(inputs, outputs, props, action_props):
+    if downstream_queue_full(props):
+        return False              # code-initiated HOLD
+    feed_one_item(inputs, props)
+    return True                    # SC -&gt; COMPLETING when the batch is done
+</code></pre>
+        <p>
+          <strong>HOLDING</strong> — runs once on the way into HELD; bring the machine to a safe
+          stopped state:
+        </p>
+        <pre><code class="language-python">def execute(inputs, outputs, props, action_props):
+    stop_feed_motor(props)
+    wait_until_machine_idle(props)
+    return True                    # SC -&gt; HELD
+</code></pre>
+        <p><strong>HELD</strong> — polls for the downstream queue to drain, then asks to unhold:</p>
+        <pre><code class="language-python">def execute(inputs, outputs, props, action_props):
+    wait_until_downstream_available(props)
+    trajectory.request_command(&quot;UNHOLD&quot;)
+    return True                    # container moves HELD -&gt; UNHOLDING
+</code></pre>
+        <p>
+          <strong>UNHOLDING</strong> — runs once on the way back to EXECUTING; restart the machine:
+        </p>
+        <pre><code class="language-python">def execute(inputs, outputs, props, action_props):
+    start_feed_motor(props)
+    return True                    # SC -&gt; EXECUTING; the EXECUTING code re-checks the queue
+</code></pre>
+        <p>
+          An operator can still take over from outside: the Instances page exposes
+          <strong>Unhold</strong> (to release the hold manually), <strong>Abort</strong>, and
+          <strong>Stop</strong>, all of which override what the action&#39;s own code is doing.
+        </p>
         <hr />
         <h2 id="4-testing-code">
           <a class="anchor" href="#4-testing-code" aria-hidden="true">#</a>4. Testing Code

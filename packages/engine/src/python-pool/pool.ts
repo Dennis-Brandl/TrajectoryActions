@@ -243,6 +243,10 @@ export class PythonWorkerPool {
         stdout_capture: response.stdout_capture,
         stderr_capture: response.stderr_capture,
         property_mutations: response.property_mutations ?? [],
+        requested_commands: (response.requested_commands ?? []).map((c) => ({
+          command: c.command,
+          reason: c.reason ?? undefined,
+        })),
       }
     } catch (err) {
       // Re-throw EngineErrors (e.g. PROPERTY_WRITE_ERROR) directly

@@ -43,4 +43,10 @@ export interface SidecarResponse {
     | 'PROPERTY_WRITE_ERROR'
   traceback?: string
   property_mutations?: Array<{ spec_name: string; entry_name: string; value: string }>
+  /**
+   * Commands requested by user code via trajectory.request_command().
+   * Sidecar validates command name; engine validates per-state legality and
+   * dispatches the first entry after the executor returns.
+   */
+  requested_commands?: Array<{ command: string; reason: string | null }>
 }
