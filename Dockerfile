@@ -29,7 +29,7 @@
 # ---------------------------------------------------------------------------
 # Stage 1: Builder — install both workspaces, build tokens, server and console
 # ---------------------------------------------------------------------------
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 ENV HUSKY=0
 WORKDIR /app
 
@@ -64,7 +64,7 @@ RUN cd TrajectoryActions && npx esbuild packages/server/src/index.ts \
 # ---------------------------------------------------------------------------
 # Stage 2a: server — Node REST API + Python sidecar + SQLite
 # ---------------------------------------------------------------------------
-FROM node:20-alpine AS server
+FROM node:22-alpine AS server
 WORKDIR /app
 
 # python3 for the action sandbox sidecar (the engine spawns `python`, so add a
