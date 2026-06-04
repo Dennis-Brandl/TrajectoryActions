@@ -20,6 +20,7 @@ import { createCommandsRouter } from './routes/commands.js'
 import { createManagementRouter } from './routes/management.js'
 import { createApiKeyAuth } from './middleware/auth.js'
 import { errorHandler } from './middleware/error-handler.js'
+import { applyApiKeyFromEnv } from './config.js'
 
 // ============================================================
 // ESM __dirname equivalent
@@ -33,6 +34,7 @@ const __dirname = path.dirname(__filename)
 // ============================================================
 
 const PORT = Number(process.env.PORT ?? 3001)
+const HOST = process.env.HOST ?? '0.0.0.0'
 // __dirname is packages/server/src (tsx) or packages/server/dist (compiled)
 // Go up to packages/server/, then packages/, then project root
 const PACKAGE_ROOT = path.resolve(__dirname, '..')
@@ -56,6 +58,10 @@ const settingsRepo = new SettingsRepository(db)
 const environmentRepo = new EnvironmentRepository(db)
 const codeVersionRepo = new CodeVersionRepository(db)
 const logRepo = new LogRepository(db)
+
+// Optionally enable auth declaratively: if ACTIONS_API_KEY is set, persist it as
+// the api_key setting so an exposed deployment requires it without manual UI steps.
+applyApiKeyFromEnv(settingsRepo, process.env.ACTIONS_API_KEY)
 
 // SSE event bus
 const sseManager = new SseManager()
@@ -165,10 +171,16 @@ app.use(errorHandler)
 // Listen
 // ============================================================
 
-app.listen(PORT, () => {
-  console.log(`Trajectory Action Server listening on http://localhost:${PORT}`)
+app.listen(PORT, HOST, () => {
+  console.log(`Trajectory Action Server listening on http://${HOST}:${PORT}`)
   console.log(`  Database: ${DB_PATH}`)
   console.log(`  Sidecar:  ${SIDECAR_SCRIPT}`)
+  if (!settingsRepo.getValue('api_key')) {
+    console.warn(
+      '\n  WARNING: no api_key is configured — the management and REST APIs are UNAUTHENTICATED.\n' +
+        '  Keep this bound to loopback (the docker compose default) or set ACTIONS_API_KEY before exposing it.\n'
+    )
+  }
 })
 
 // ============================================================
