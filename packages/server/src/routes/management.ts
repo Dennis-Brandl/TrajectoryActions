@@ -2664,7 +2664,15 @@ export function createManagementRouter(
   // MGMT-18: GET /settings (list all)
   router.get('/settings', (_req, res, next) => {
     try {
-      const settings = settingsRepo.getAll()
+      // Redact the api_key value — never expose the secret over the API. Report
+      // only whether one is configured.
+      const settings = settingsRepo
+        .getAll()
+        .map((s) =>
+          s.key === 'api_key'
+            ? { ...s, value: '', default_value: '', configured: s.value.length > 0 }
+            : s
+        )
       res.status(200).json({ data: settings, meta: {} })
     } catch (err) {
       next(err)
@@ -2704,15 +2712,12 @@ export function createManagementRouter(
         logRepo.trimToSize(Number(value))
       }
 
-      res.status(200).json({
-        data: {
-          key,
-          value,
-          previous_value: previousValue,
-          applied: true,
-        },
-        meta: {},
-      })
+      // Never echo the api_key value (or its previous value) back in responses.
+      const data =
+        key === 'api_key'
+          ? { key, applied: true }
+          : { key, value, previous_value: previousValue, applied: true }
+      res.status(200).json({ data, meta: {} })
     } catch (err) {
       next(err)
     }
