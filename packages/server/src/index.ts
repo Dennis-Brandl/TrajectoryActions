@@ -134,6 +134,11 @@ app.use(
 
 app.use('/trajectory/v1', createCommandsRouter(manager, sseManager))
 
+// API key auth on all /management/v1/ routes (mirrors /trajectory/v1 above).
+// Closes the unauthenticated management surface (incl. the code/test code-exec
+// endpoint and snapshot import/export). Open only when no api_key is configured.
+app.use('/management/v1', createApiKeyAuth(settingsRepo))
+
 app.use(
   '/management/v1',
   createManagementRouter(
