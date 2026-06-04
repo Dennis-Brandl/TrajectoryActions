@@ -20,7 +20,7 @@ import { createCommandsRouter } from './routes/commands.js'
 import { createManagementRouter } from './routes/management.js'
 import { createApiKeyAuth } from './middleware/auth.js'
 import { errorHandler } from './middleware/error-handler.js'
-import { applyApiKeyFromEnv } from './config.js'
+import { applyApiKeyFromEnv, isOriginAllowed } from './config.js'
 
 // ============================================================
 // ESM __dirname equivalent
@@ -98,7 +98,11 @@ const app = express()
 
 app.use(
   cors({
-    origin: '*',
+    // Default: allow loopback origins only; override with ACTIONS_ALLOWED_ORIGINS
+    // (comma-separated). Blocks drive-by requests from arbitrary websites.
+    origin: (origin, callback) => {
+      callback(null, isOriginAllowed(origin, process.env.ACTIONS_ALLOWED_ORIGINS))
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'X-API-Key', 'Last-Event-ID'],
     exposedHeaders: ['Content-Type'],
