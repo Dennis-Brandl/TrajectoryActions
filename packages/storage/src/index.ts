@@ -19,6 +19,7 @@ export type { Migration } from './migrations/runner.js'
 export { migration as initialMigration } from './migrations/001-initial-schema.js'
 export { migration as actionTimeoutMigration } from './migrations/002-action-timeout.js'
 export { migration as lifecycleStateMigration } from './migrations/003-lifecycle-state.js'
+export { migration as apiKeySettingMigration } from './migrations/004-api-key-setting.js'
 
 export type {
   Visibility,
@@ -52,6 +53,7 @@ import { runMigrations } from './migrations/runner.js'
 import { migration as initialMigration } from './migrations/001-initial-schema.js'
 import { migration as actionTimeoutMigration } from './migrations/002-action-timeout.js'
 import { migration as lifecycleStateMigration } from './migrations/003-lifecycle-state.js'
+import { migration as apiKeySettingMigration } from './migrations/004-api-key-setting.js'
 import type BetterSqlite3 from 'better-sqlite3'
 
 /**
@@ -60,7 +62,12 @@ import type BetterSqlite3 from 'better-sqlite3'
  */
 export function initializeDatabase(path: string): BetterSqlite3.Database {
   const db = openDatabase(path)
-  runMigrations(db, [initialMigration, actionTimeoutMigration, lifecycleStateMigration])
+  runMigrations(db, [
+    initialMigration,
+    actionTimeoutMigration,
+    lifecycleStateMigration,
+    apiKeySettingMigration,
+  ])
 
   // Permanent rule: a distributed app must guarantee its DB has all required
   // tables on startup. Migrations create them; verify and refuse to serve an

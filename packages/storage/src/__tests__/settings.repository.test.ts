@@ -3,6 +3,7 @@ import type BetterSqlite3 from 'better-sqlite3'
 import { openDatabase } from '../database.js'
 import { runMigrations } from '../migrations/runner.js'
 import { migration as initialMigration } from '../migrations/001-initial-schema.js'
+import { migration as apiKeySettingMigration } from '../migrations/004-api-key-setting.js'
 import { SettingsRepository } from '../repositories/settings.repository.js'
 import { NotFoundError, ValidationError } from '../errors.js'
 
@@ -16,7 +17,7 @@ describe('SettingsRepository', () => {
 
   beforeEach(() => {
     db = openDatabase(':memory:')
-    runMigrations(db, [initialMigration])
+    runMigrations(db, [initialMigration, apiKeySettingMigration])
     repo = new SettingsRepository(db)
   })
 
@@ -29,9 +30,9 @@ describe('SettingsRepository', () => {
   // -------------------------------------------------------------------------
 
   describe('getAll', () => {
-    it('returns all 4 default settings', () => {
+    it('returns all 5 default settings', () => {
       const settings = repo.getAll()
-      expect(settings).toHaveLength(4)
+      expect(settings).toHaveLength(5)
     })
 
     it('returns settings ordered by key ASC', () => {
@@ -47,6 +48,7 @@ describe('SettingsRepository', () => {
       expect(keys).toContain('python_pool_size')
       expect(keys).toContain('execution_timeout_ms')
       expect(keys).toContain('instance_retention_hours')
+      expect(keys).toContain('api_key')
     })
   })
 
@@ -251,17 +253,44 @@ describe('SettingsRepository', () => {
   // -------------------------------------------------------------------------
 
   describe('resetAll', () => {
-    it('resets all 4 settings to their default values', () => {
+    it('resets all 5 settings to their default values', () => {
       // Change a few settings
       repo.update('log_max_size', '5000')
       repo.update('python_pool_size', '8')
 
       const allReset = repo.resetAll()
-      expect(allReset).toHaveLength(4)
+      expect(allReset).toHaveLength(5)
 
       for (const setting of allReset) {
         expect(setting.value).toBe(setting.default_value)
       }
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // api_key (string setting; empty = open access)
+  // -------------------------------------------------------------------------
+
+  describe('api_key', () => {
+    it('is seeded empty by default', () => {
+      expect(repo.getValue('api_key')).toBe('')
+    })
+
+    it('can be set to a secret and read back', () => {
+      repo.update('api_key', 'super-secret-key')
+      expect(repo.getValue('api_key')).toBe('super-secret-key')
+    })
+
+    it('can be cleared back to empty (open access)', () => {
+      repo.update('api_key', 'k')
+      repo.update('api_key', '')
+      expect(repo.getValue('api_key')).toBe('')
+    })
+
+    it('is a string-typed setting', () => {
+      const setting = repo.get('api_key')
+      expect(setting).not.toBeNull()
+      expect(setting!.value_type).toBe('string')
     })
   })
 })
