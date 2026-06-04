@@ -3,6 +3,7 @@ import { execSync } from 'node:child_process'
 import { statSync } from 'node:fs'
 import multer from 'multer'
 import JSZip from 'jszip'
+import { loadZipSafely } from '../lib/safe-zip.js'
 import type BetterSqlite3 from 'better-sqlite3'
 import { createExportImportRouter } from './export-import.js'
 import type { InstanceManager } from '@trajectory/engine'
@@ -401,7 +402,7 @@ export function createManagementRouter(
         if (ext === 'wfactioncodex') {
           let zip: JSZip
           try {
-            zip = await JSZip.loadAsync(file.buffer)
+            zip = await loadZipSafely(file.buffer)
           } catch {
             return void res.status(400).json({
               error: {
@@ -481,7 +482,7 @@ export function createManagementRouter(
         if (ext === 'wfenvirbundlex') {
           let zip: JSZip
           try {
-            zip = await JSZip.loadAsync(file.buffer)
+            zip = await loadZipSafely(file.buffer)
           } catch {
             return void res.status(400).json({
               error: {
@@ -601,7 +602,7 @@ export function createManagementRouter(
         if (ext === 'wfenvirx') {
           let zip: JSZip
           try {
-            zip = await JSZip.loadAsync(file.buffer)
+            zip = await loadZipSafely(file.buffer)
           } catch {
             return void res.status(400).json({
               error: {
@@ -909,7 +910,7 @@ export function createManagementRouter(
         if (ext === 'wfenvirlibx') {
           let zip: JSZip
           try {
-            zip = await JSZip.loadAsync(file.buffer)
+            zip = await loadZipSafely(file.buffer)
           } catch {
             return void res.status(400).json({
               error: {

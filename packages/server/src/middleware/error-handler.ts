@@ -1,6 +1,7 @@
 import type { ErrorRequestHandler } from 'express'
 import { EngineError, InvalidStateTransitionError } from '@trajectory/engine'
 import { NotFoundError, ValidationError } from '@trajectory/storage'
+import { ZipLimitError } from '../lib/safe-zip.js'
 
 // ============================================================
 // HTTP status mapping for engine error codes
@@ -66,6 +67,17 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, next) => {
     return void res.status(400).json({
       error: {
         code: 'VALIDATION_ERROR',
+        message: err.message,
+        details: {},
+      },
+    })
+  }
+
+  // Zip-bomb / archive-too-large guard
+  if (err instanceof ZipLimitError) {
+    return void res.status(400).json({
+      error: {
+        code: 'ARCHIVE_TOO_LARGE',
         message: err.message,
         details: {},
       },
