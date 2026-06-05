@@ -30,3 +30,15 @@ scripts/scenarios/warehouse/*.js
 scripts/scenarios/warehouse/*.js.map
 scripts/scenarios/warehouse/*.d.ts
 scripts/scenarios/warehouse/*.d.ts.map
+
+# --- Public-release hygiene (internal-only; not shipped publicly) ---
+.planning/
+.claude/
+tasks/
+docs/superpowers/
+*.docx
+*.pptx
+*.continue-here.md
+
+# Generated at build time (build:help); not tracked
+apps/console/public/help.html
