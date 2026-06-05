@@ -3,6 +3,7 @@ import { execSync } from 'node:child_process'
 import { statSync } from 'node:fs'
 import multer from 'multer'
 import JSZip from 'jszip'
+import { loadZipSafely } from '../lib/safe-zip.js'
 import type BetterSqlite3 from 'better-sqlite3'
 import { createExportImportRouter } from './export-import.js'
 import type { InstanceManager } from '@trajectory/engine'
@@ -401,7 +402,7 @@ export function createManagementRouter(
         if (ext === 'wfactioncodex') {
           let zip: JSZip
           try {
-            zip = await JSZip.loadAsync(file.buffer)
+            zip = await loadZipSafely(file.buffer)
           } catch {
             return void res.status(400).json({
               error: {
@@ -481,7 +482,7 @@ export function createManagementRouter(
         if (ext === 'wfenvirbundlex') {
           let zip: JSZip
           try {
-            zip = await JSZip.loadAsync(file.buffer)
+            zip = await loadZipSafely(file.buffer)
           } catch {
             return void res.status(400).json({
               error: {
@@ -601,7 +602,7 @@ export function createManagementRouter(
         if (ext === 'wfenvirx') {
           let zip: JSZip
           try {
-            zip = await JSZip.loadAsync(file.buffer)
+            zip = await loadZipSafely(file.buffer)
           } catch {
             return void res.status(400).json({
               error: {
@@ -909,7 +910,7 @@ export function createManagementRouter(
         if (ext === 'wfenvirlibx') {
           let zip: JSZip
           try {
-            zip = await JSZip.loadAsync(file.buffer)
+            zip = await loadZipSafely(file.buffer)
           } catch {
             return void res.status(400).json({
               error: {
@@ -2664,7 +2665,15 @@ export function createManagementRouter(
   // MGMT-18: GET /settings (list all)
   router.get('/settings', (_req, res, next) => {
     try {
-      const settings = settingsRepo.getAll()
+      // Redact the api_key value — never expose the secret over the API. Report
+      // only whether one is configured.
+      const settings = settingsRepo
+        .getAll()
+        .map((s) =>
+          s.key === 'api_key'
+            ? { ...s, value: '', default_value: '', configured: s.value.length > 0 }
+            : s
+        )
       res.status(200).json({ data: settings, meta: {} })
     } catch (err) {
       next(err)
@@ -2704,15 +2713,12 @@ export function createManagementRouter(
         logRepo.trimToSize(Number(value))
       }
 
-      res.status(200).json({
-        data: {
-          key,
-          value,
-          previous_value: previousValue,
-          applied: true,
-        },
-        meta: {},
-      })
+      // Never echo the api_key value (or its previous value) back in responses.
+      const data =
+        key === 'api_key'
+          ? { key, applied: true }
+          : { key, value, previous_value: previousValue, applied: true }
+      res.status(200).json({ data, meta: {} })
     } catch (err) {
       next(err)
     }

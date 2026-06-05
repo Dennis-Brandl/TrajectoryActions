@@ -23,7 +23,11 @@ services:
       dockerfile: TrajectoryActions/Dockerfile
       target: server
     ports:
-      - '3002:3002'
+      # Loopback by default — do NOT expose the API to a network without auth.
+      # To expose: change to "3002:3002" (all interfaces) AND set ACTIONS_API_KEY.
+      - '127.0.0.1:3002:3002'
+    environment:
+      - ACTIONS_API_KEY=${ACTIONS_API_KEY:-}
     volumes:
       - trajectoryactions-data:/data
     restart: unless-stopped
@@ -34,10 +38,13 @@ services:
       dockerfile: TrajectoryActions/Dockerfile
       target: console
     ports:
-      - '3003:80'
+      - '127.0.0.1:3003:80'
     environment:
       # The console (nginx) reverse-proxies /trajectory + /management here.
       - ACTIONS_API_UPSTREAM=http://server:3002
+      # Forwarded as X-API-Key on proxied requests so the browser console
+      # authenticates without the key ever reaching client-side JS.
+      - ACTIONS_API_KEY=${ACTIONS_API_KEY:-}
     depends_on:
       - server
     restart: unless-stopped

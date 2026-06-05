@@ -7,6 +7,7 @@ const KNOWN_KEYS = new Set([
   'execution_timeout_ms',
   'instance_retention_hours',
   'log_max_size',
+  'api_key',
 ])
 
 function validateValue(key: string, value: string): void {
@@ -35,6 +36,10 @@ function validateValue(key: string, value: string): void {
       if (!Number.isInteger(num) || num < 1) {
         throw new ValidationError(key, 'must be a positive integer')
       }
+      break
+
+    case 'api_key':
+      // Any string is accepted; empty string means "open access" (no auth required).
       break
 
     default:

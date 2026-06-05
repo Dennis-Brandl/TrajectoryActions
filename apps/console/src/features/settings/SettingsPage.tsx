@@ -40,6 +40,11 @@ const SETTING_LABELS: Record<string, { label: string; description: string; unit?
     description: 'How long to keep completed instance records',
     unit: 'hours',
   },
+  api_key: {
+    label: 'API Key',
+    description:
+      'Require this key (sent as the X-API-Key header) on the REST and management APIs. Leave empty for open access — safe only when bound to loopback.',
+  },
 }
 
 // ---- Section group component ----
@@ -47,10 +52,14 @@ function SettingField({
   settingKey,
   value,
   onChange,
+  type = 'number',
+  hint,
 }: {
   settingKey: string
   value: string
   onChange: (key: string, value: string) => void
+  type?: string
+  hint?: string
 }) {
   const meta = SETTING_LABELS[settingKey]
   if (!meta) return null
@@ -65,12 +74,13 @@ function SettingField({
       </Label>
       <Input
         id={settingKey}
-        type="number"
+        type={type}
         value={value}
         onChange={(e) => onChange(settingKey, e.target.value)}
         className="max-w-xs"
+        autoComplete="off"
       />
-      <p className="text-xs text-muted-foreground">{meta.description}</p>
+      <p className="text-xs text-muted-foreground">{hint ?? meta.description}</p>
     </div>
   )
 }
@@ -235,6 +245,30 @@ export default function SettingsPage() {
             settingKey="instance_retention_hours"
             value={formValues['instance_retention_hours'] ?? ''}
             onChange={handleFieldChange}
+          />
+        </CardContent>
+      </Card>
+
+      {/* Security */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Security</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <SettingField
+            settingKey="api_key"
+            type="password"
+            value={formValues['api_key'] ?? ''}
+            onChange={handleFieldChange}
+            hint={
+              (
+                settingsData?.settings.find((s) => s.key === 'api_key') as
+                  | { configured?: boolean }
+                  | undefined
+              )?.configured
+                ? 'An API key is set. Enter a new value to replace it.'
+                : 'No API key set — the APIs are open. Set one before exposing this container beyond loopback.'
+            }
           />
         </CardContent>
       </Card>

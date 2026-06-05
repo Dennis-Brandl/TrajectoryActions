@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import JSZip from 'jszip'
+import { loadZipSafely } from '../lib/safe-zip.js'
 import multer from 'multer'
 import type {
   ActionRepository,
@@ -108,7 +109,7 @@ export function createExportImportRouter(
         })
       }
 
-      JSZip.loadAsync(file.buffer)
+      loadZipSafely(file.buffer)
         .then(async (zip) => {
           const manifestFile = zip.file('manifest.json')
           if (!manifestFile) {
@@ -508,7 +509,7 @@ export function createExportImportRouter(
         })
       }
 
-      JSZip.loadAsync(file.buffer)
+      loadZipSafely(file.buffer)
         .then(async (zip) => {
           const manifestFile = zip.file('manifest.json')
           if (!manifestFile) {

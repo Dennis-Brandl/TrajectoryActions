@@ -753,13 +753,13 @@ describe('GET /management/v1/log/:id (MGMT-17)', () => {
 // ============================================================
 
 describe('GET /management/v1/settings (MGMT-18)', () => {
-  it('returns all 4 settings with correct shape', async () => {
+  it('returns all 5 settings with correct shape', async () => {
     const { app, manager } = createTestApp()
     try {
       const res = await request(app).get('/management/v1/settings')
       expect(res.status).toBe(200)
       expect(Array.isArray(res.body.data)).toBe(true)
-      expect(res.body.data).toHaveLength(4)
+      expect(res.body.data).toHaveLength(5)
 
       // Verify shape of each setting
       const setting = res.body.data[0] as Record<string, unknown>
@@ -773,7 +773,7 @@ describe('GET /management/v1/settings (MGMT-18)', () => {
     }
   }, 30000)
 
-  it('returns all 4 known setting keys', async () => {
+  it('returns all known setting keys', async () => {
     const { app, manager } = createTestApp()
     try {
       const res = await request(app).get('/management/v1/settings')
@@ -783,6 +783,7 @@ describe('GET /management/v1/settings (MGMT-18)', () => {
       expect(keys).toContain('execution_timeout_ms')
       expect(keys).toContain('instance_retention_hours')
       expect(keys).toContain('log_max_size')
+      expect(keys).toContain('api_key')
     } finally {
       await manager.shutdown()
     }
