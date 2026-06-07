@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import JSZip from 'jszip'
 import { loadZipSafely } from '../lib/safe-zip.js'
+import { CONTAINER_VERSION } from '../version.js'
 import multer from 'multer'
 import type {
   ActionRepository,
@@ -252,7 +253,7 @@ export function createExportImportRouter(
       const manifest = {
         format_version: '1.0',
         exported_at: new Date().toISOString(),
-        container_version: '1.0.0',
+        container_version: CONTAINER_VERSION,
         environment_count: environments.length,
         action_count: totalActions,
         code_file_count: totalCodeFiles,
@@ -369,7 +370,7 @@ export function createExportImportRouter(
       format: 'WFenvirBundleX' as const,
       format_version: 1 as const,
       exported_at: new Date().toISOString(),
-      container_version: '1.0.0',
+      container_version: CONTAINER_VERSION,
       environment_oid: env.oid,
       environment_local_id: env.local_id,
       action_count: actions.length,
