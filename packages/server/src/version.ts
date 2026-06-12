@@ -7,4 +7,4 @@
  * no package.json alongside. Bump together with the suite version in the
  * root package.json.
  */
-export const CONTAINER_VERSION = '2.1.1'
+export const CONTAINER_VERSION = '2.1.2'
