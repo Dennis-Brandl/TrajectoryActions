@@ -5,29 +5,26 @@
 #   - target "server"  : the REST API (Node) + Python sidecar + SQLite
 #   - target "console" : the management UI (static SPA) served by nginx
 #
-# IMPORTANT — BUILD CONTEXT must be the PARENT directory that holds both
-# `TrajectoryActions` and `TrajectoryEditor` as siblings. The console depends
-# on @trajectory/ui + @trajectory/tokens (which live in TrajectoryEditor) via
-# file: links, and the console build resolves @trajectory/ui's dependencies
-# from the Editor's install — so the builder reproduces the dev layout:
-# install the Editor workspace, build tokens, then install + build Actions.
+# @trajectory/ui + @trajectory/tokens are vendored INSIDE TrajectoryActions
+# (packages/ui, packages/tokens), so the console build is self-contained — no
+# TrajectoryEditor checkout required. The compose service uses the parent dir as
+# build context (dockerfile: TrajectoryActions/Dockerfile); the tokens' dist CSS
+# is .dockerignored (**/dist) and so is regenerated from source in the builder.
 #
-# Recommended — run from inside TrajectoryActions/ (its compose sets the
-# parent as context automatically):
+# Recommended:
 #     docker compose up --build -d
 #
-# Manual — run from the parent dir that holds both repos as siblings:
+# Manual — run from the dir that holds TrajectoryActions:
 #     docker build -f TrajectoryActions/Dockerfile --target server  -t trajectory-action-server  .
 #     docker build -f TrajectoryActions/Dockerfile --target console -t trajectory-action-console .
 #
 # Ports: server 3002; console 80 (compose maps it to 3003).
 #
-# NOTE: this image has not been built locally (no Docker on the dev machine).
-# Validate with a real `docker compose up --build` before publishing.
+# Validated locally via `docker compose build` (2026-06-13) after vendoring.
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# Stage 1: Builder — install both workspaces, build tokens, server and console
+# Stage 1: Builder — install workspace, build tokens, then server and console
 # ---------------------------------------------------------------------------
 FROM node:22-alpine AS builder
 ENV HUSKY=0
@@ -36,18 +33,19 @@ WORKDIR /app
 # Toolchain for the better-sqlite3 native build
 RUN apk add --no-cache python3 make g++
 
-# --- TrajectoryEditor: install the workspace so @trajectory/ui's deps and
-#     @trajectory/tokens' build tooling are present for the console build.
-#     (Only package manifests + the shared packages are needed — not the app.)
-COPY TrajectoryEditor/package.json TrajectoryEditor/package-lock.json TrajectoryEditor/.npmrc TrajectoryEditor/
-COPY TrajectoryEditor/packages TrajectoryEditor/packages
-RUN cd TrajectoryEditor && npm ci
-# Build design tokens → dist CSS (console imports @trajectory/tokens/dist/*.css)
-RUN cd TrajectoryEditor && npm -w @trajectory/tokens run build
-
-# --- TrajectoryActions: install, compile server packages, build console ---
+# --- TrajectoryActions: install, build vendored tokens, compile server, build console ---
 COPY TrajectoryActions TrajectoryActions
-RUN cd TrajectoryActions && npm ci
+# Cross-platform lockfile caveat (npm/cli#4828): the committed package-lock.json
+# is host-generated and npm under-records the Alpine/musl native optional deps
+# (@tailwindcss/oxide, lightningcss), so under `npm ci` their native bindings go
+# uninstalled here and the console's vite build fails. Drop the lockfile so npm
+# resolves the correct musl binaries fresh for this image (versions stay bounded
+# by package.json; the repo + CI keep `npm ci` against the committed lock).
+RUN cd TrajectoryActions && rm -f package-lock.json && npm install
+# Regenerate the vendored design tokens → dist CSS. The console imports
+# @trajectory/tokens/dist/*.css, but **/dist is stripped by .dockerignore, so
+# rebuild it from the token source (style-dictionary is a tokens devDep).
+RUN cd TrajectoryActions && npm -w @trajectory/tokens run build
 # Compile the server's TS project graph (storage + engine + server) → dist
 RUN cd TrajectoryActions && npx tsc --build packages/server
 # Build the console SPA (Vite only — typecheck is not needed for the artifact)
