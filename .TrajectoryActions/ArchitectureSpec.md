@@ -315,7 +315,7 @@ Single port (default 3000, configurable via `PORT` env var):
 
 | Path Prefix        | Handler               | Description                        |
 | ------------------ | --------------------- | ---------------------------------- |
-| `/trajectory/v1/*`   | Trajectory API routes | REST protocol for workflow clients |
+| `/trajectory/v1/*` | Trajectory API routes | REST protocol for workflow clients |
 | `/management/v1/*` | Management API routes | Console backend                    |
 | `/console/*`       | Static file server    | React SPA assets                   |
 | `/`                | Redirect              | → `/console/`                      |

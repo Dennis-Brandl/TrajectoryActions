@@ -1,5 +1,9 @@
 node_modules/
 dist/
+# Exception: vendored design tokens ship their built CSS (the console imports
+# @trajectory/tokens/dist/tokens.*.css; tokens is not rebuilt in CI).
+!packages/tokens/dist/
+!packages/tokens/dist/*.css
 *.tsbuildinfo
 .env
 .env.*

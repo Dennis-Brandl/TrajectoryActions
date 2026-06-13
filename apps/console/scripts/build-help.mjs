@@ -165,4 +165,6 @@ const html = `<!doctype html>
 
 mkdirSync(OUT_DIR, { recursive: true })
 writeFileSync(OUT, html, 'utf-8')
-console.log(`Wrote ${path.relative(ROOT, OUT)} (${(html.length / 1024).toFixed(1)} kB, ${tocItems.length} TOC entries)`)
+console.log(
+  `Wrote ${path.relative(ROOT, OUT)} (${(html.length / 1024).toFixed(1)} kB, ${tocItems.length} TOC entries)`
+)

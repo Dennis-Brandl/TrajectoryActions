@@ -166,12 +166,12 @@ Maps to a host directory. Useful for development and easy backup access.
 
 Single port serves all traffic:
 
-| Internal Port | Default External | Path               | Handler                |
-| ------------- | ---------------- | ------------------ | ---------------------- |
-| 3000          | 3000             | `/trajectory/v1/*`   | Trajectory REST protocol |
-| 3000          | 3000             | `/management/v1/*` | Management console API |
-| 3000          | 3000             | `/console/*`       | Management console SPA |
-| 3000          | 3000             | `/`                | Redirect → `/console/` |
+| Internal Port | Default External | Path               | Handler                  |
+| ------------- | ---------------- | ------------------ | ------------------------ |
+| 3000          | 3000             | `/trajectory/v1/*` | Trajectory REST protocol |
+| 3000          | 3000             | `/management/v1/*` | Management console API   |
+| 3000          | 3000             | `/console/*`       | Management console SPA   |
+| 3000          | 3000             | `/`                | Redirect → `/console/`   |
 
 To expose on a different host port:
 

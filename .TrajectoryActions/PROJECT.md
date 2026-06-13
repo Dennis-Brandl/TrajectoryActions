@@ -66,7 +66,7 @@ Node.js/TypeScript backend with Python sidecar subprocess pool:
 | `ArchitectureSpec.md`      | Project structure, package layout, component architecture                              |
 | `DataModelSpec.md`         | Complete data model — stored entities, runtime instances, code versions                |
 | `StateMachineSpec.md`      | ISA-88 state machine (inherited from Trajectory ecosystem)                             |
-| `RESTProtocolSpec.md`      | Trajectory REST protocol implementation (server-side perspective)                        |
+| `RESTProtocolSpec.md`      | Trajectory REST protocol implementation (server-side perspective)                      |
 | `ManagementAPISpec.md`     | Management console REST API endpoints                                                  |
 | `ManagementConsoleSpec.md` | Management console UI screens and features                                             |
 | `ExecutionEngineSpec.md`   | Action code execution model — subprocess sandboxing, parameter passing, state handlers |
